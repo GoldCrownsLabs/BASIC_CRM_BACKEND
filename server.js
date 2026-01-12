@@ -14,7 +14,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Database connection - FIXED VERSION
+// Database connection
 const connectDB = async () => {
   try {
     await mongoose.connect(process.env.MONGO_URI);
@@ -28,10 +28,11 @@ const connectDB = async () => {
 
 connectDB();
 
-// Basic route
+// Root route
 app.get('/', (req, res) => {
-  res.json({ 
-    message: 'CRM Backend API is running',
+  res.json({
+    success: true,
+    message: 'E-commerce API is running',
     status: 'OK',
     timestamp: new Date(),
     database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'
@@ -40,26 +41,24 @@ app.get('/', (req, res) => {
 
 // Import routes
 const authRoutes = require('./routes/auth');
-// Other routes...
 
 // Use routes
 app.use('/api/auth', authRoutes);
-// Other routes...
-
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ 
-    success: false,
-    error: 'Something went wrong!' 
-  });
-});
 
 // 404 handler
 app.use((req, res) => {
-  res.status(404).json({ 
+  res.status(404).json({
     success: false,
-    error: 'Route not found' 
+    error: `Route not found: ${req.method} ${req.url}`
+  });
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('Error:', err.stack);
+  res.status(500).json({
+    success: false,
+    error: 'Internal server error'
   });
 });
 
