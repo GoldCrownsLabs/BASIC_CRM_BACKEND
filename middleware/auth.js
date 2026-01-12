@@ -1,3 +1,4 @@
+// middleware/auth.js
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
@@ -14,10 +15,16 @@ const protect = async (req, res, next) => {
       req.user = await User.findById(decoded.id).select('-password');
       next();
     } catch (error) {
-      return res.status(401).json({ error: 'Not authorized, token failed' });
+      return res.status(401).json({ 
+        success: false,  // ✅ YEH ADD KARO
+        error: 'Not authorized, token failed' 
+      });
     }
   } else {
-    return res.status(401).json({ error: 'Not authorized, no token' });
+    return res.status(401).json({ 
+      success: false,  // ✅ YEH ADD KARO
+      error: 'Not authorized, no token' 
+    });
   }
 };
 

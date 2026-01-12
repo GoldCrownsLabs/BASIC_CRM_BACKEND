@@ -380,6 +380,9 @@
 
 // module.exports = router;
 
+
+// Updated Auth code 
+
 const express = require("express");
 const router = express.Router();
 const jwt = require("jsonwebtoken");
@@ -533,11 +536,8 @@ router.post("/register", async (req, res) => {
 
     const user = await User.create(userData);
 
-    // Get the freshly created user with all fields
-    const newUser = await User.findById(user._id);
-
     // Generate token
-    const token = generateToken(newUser._id);
+    const token = generateToken(user._id);
 
     // Send COMPLETE user response
     res.status(201).json({
@@ -545,18 +545,18 @@ router.post("/register", async (req, res) => {
       message: "User registered successfully",
       token,
       user: {
-        id: newUser._id,
-        name: newUser.name,
-        email: newUser.email,
-        phone: newUser.phone,
-        profileImage: newUser.profileImage,
-        theme: newUser.theme,
-        addresses: newUser.addresses,
-        role: newUser.role,
-        lastSync: newUser.lastSync,
-        lastLogin: newUser.lastLogin,
-        createdAt: newUser.createdAt,
-        updatedAt: newUser.updatedAt,
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        profileImage: user.profileImage,
+        theme: user.theme,
+        addresses: user.addresses,
+        role: user.role,
+        lastSync: user.lastSync,
+        lastLogin: user.lastLogin,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
       },
     });
   } catch (error) {
@@ -672,14 +672,8 @@ router.post("/login", async (req, res) => {
 // @route   GET /api/auth/profile
 router.get("/profile", protect, async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select("-password");
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        error: "User not found",
-      });
-    }
+    // req.user already has user from middleware
+    const user = req.user;
 
     res.json({
       success: true,
@@ -725,7 +719,7 @@ router.put("/profile", protect, async (req, res) => {
     if (newsletterSubscription !== undefined)
       updateData.newsletterSubscription = newsletterSubscription;
 
-    // Update user
+    // Update user using req.user._id
     const updatedUser = await User.findByIdAndUpdate(
       req.user._id,
       { $set: updateData },
@@ -781,7 +775,7 @@ router.put("/change-password", protect, async (req, res) => {
       });
     }
 
-    // Get user with password
+    // Get user with password using req.user._id
     const user = await User.findById(req.user._id).select("+password");
 
     if (!user) {
@@ -857,14 +851,8 @@ router.delete("/delete-profile", protect, async (req, res) => {
 // @access  Private
 router.get("/addresses", protect, async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select("addresses");
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        error: "User not found",
-      });
-    }
+    // req.user already has user data
+    const user = req.user;
 
     res.json({
       success: true,
@@ -906,6 +894,7 @@ router.post("/addresses", protect, async (req, res) => {
       isDefault: isDefault || false,
     };
 
+    // Use req.user._id to get fresh user data
     const user = await User.findById(req.user._id);
 
     if (!user) {
@@ -955,6 +944,7 @@ router.put("/addresses/:addressId", protect, async (req, res) => {
     const { addressId } = req.params;
     const updateData = req.body;
 
+    // Get fresh user data
     const user = await User.findById(req.user._id);
 
     if (!user) {
@@ -1015,6 +1005,7 @@ router.delete("/addresses/:addressId", protect, async (req, res) => {
   try {
     const { addressId } = req.params;
 
+    // Get fresh user data
     const user = await User.findById(req.user._id);
 
     if (!user) {
@@ -1080,6 +1071,7 @@ router.put("/addresses/:addressId/set-default", protect, async (req, res) => {
   try {
     const { addressId } = req.params;
 
+    // Get fresh user data
     const user = await User.findById(req.user._id);
 
     if (!user) {
@@ -1151,32 +1143,8 @@ router.get("/users", protect, admin, async (req, res) => {
   }
 });
 
-// @route   GET /api/auth/users/:id
-// @desc    Get user by ID (Admin only)
-// @access  Private/Admin
-router.get("/users/:id", protect, admin, async (req, res) => {
-  try {
-    const user = await User.findById(req.params.id).select("-password");
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        error: "User not found",
-      });
-    }
-
-    res.json({
-      success: true,
-      user,
-    });
-  } catch (error) {
-    console.error("Get User by ID Error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch user",
-    });
-  }
-});
+// REMOVED: /api/auth/users/:id route - Not needed as we have profile route
+// Admin can get any user's details by using admin update route if needed
 
 // @route   PUT /api/auth/users/:userId
 // @desc    Update any user profile (Admin only)
@@ -1271,11 +1239,9 @@ router.delete("/users/:userId", protect, admin, async (req, res) => {
 // @desc    Logout user
 // @access  Private
 router.post("/logout", protect, async (req, res) => {
-  // For JWT, we don't need to do anything server-side
-  // Client should remove the token
   res.json({
     success: true,
-    message: "Logged out successfully. Please remove the token from client.",
+    message: "Logged out successfully",
   });
 });
 
@@ -1284,25 +1250,17 @@ router.post("/logout", protect, async (req, res) => {
 // @access  Private
 router.post("/refresh-token", protect, async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select("-password");
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        error: "User not found",
-      });
-    }
-
-    const token = generateToken(user._id);
+    // req.user already has user data
+    const token = generateToken(req.user._id);
 
     res.json({
       success: true,
       token,
       user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
+        id: req.user._id,
+        name: req.user.name,
+        email: req.user.email,
+        role: req.user.role,
       },
     });
   } catch (error) {
@@ -1479,5 +1437,6 @@ router.get("/wishlist", protect, async (req, res) => {
     });
   }
 });
+
 
 module.exports = router;
