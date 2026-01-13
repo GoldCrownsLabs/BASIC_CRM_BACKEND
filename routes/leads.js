@@ -5,6 +5,8 @@ const leadController = require('../controllers/leadController');
 const { protect } = require('../middleware/auth'); 
 
 // Apply auth middleware to all routes
+
+
 router.use(protect);
 
 // Lead routes
