@@ -1392,6 +1392,7 @@ router.put("/users/:userId/toggle-active", protect, admin, async (req, res) => {
 
 // @route   GET /api/auth/cart
 // @desc    Get user's cart
+
 // @access  Private
 router.get("/cart", protect, async (req, res) => {
   try {
