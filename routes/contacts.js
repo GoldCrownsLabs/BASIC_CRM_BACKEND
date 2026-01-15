@@ -1,245 +1,140 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const { check, validationResult } = require('express-validator');
-const { protect } = require('../middleware/auth');
-const Contact = require('../models/Contact');
+const { check, validationResult } = require("express-validator");
+const { protect } = require("../middleware/auth");
+const {
+  getContacts,
+  getContactById,
+  createContact,
+  updateContact,
+  toggleFavorite,
+  deleteContact,
+  getContactStats,
+  getTagStats,
+  batchSyncContacts,
+  exportContacts,
+  getCompanies,
+  getTags,
+} = require("../controllers/contactController");
+
+// Validation middleware
+const validate = (validations) => {
+  return async (req, res, next) => {
+    await Promise.all(validations.map((validation) => validation.run(req)));
+
+    const errors = validationResult(req);
+    if (errors.isEmpty()) {
+      return next();
+    }
+
+    res.status(400).json({
+      success: false,
+      errors: errors.array(),
+      message: "Validation failed",
+    });
+  };
+};
+
+// Contact creation validation
+const createContactValidation = [
+  check("firstName", "First name is required and must be at least 2 characters")
+    .not()
+    .isEmpty()
+    .trim()
+    .escape()
+    .isLength({ min: 2 }),
+  check("lastName", "Last name must be a string").optional().trim().escape(),
+  check("email", "Please include a valid email")
+    .optional()
+    .isEmail()
+    .normalizeEmail(),
+  check("phone", "Phone number must be valid").optional().isMobilePhone(),
+  check("company", "Company must be a string").optional().trim().escape(),
+  check("jobTitle", "Job title must be a string").optional().trim().escape(),
+  check("tags", "Tags must be an array of strings").optional().isArray(),
+  check("tags.*", "Each tag must be a string").optional().trim().escape(),
+  check("notes", "Notes cannot exceed 2000 characters")
+    .optional()
+    .isLength({ max: 2000 })
+    .trim()
+    .escape(),
+];
+
+// Contact update validation
+const updateContactValidation = [
+  check("firstName", "First name must be a string")
+    .optional()
+    .not()
+    .isEmpty()
+    .trim()
+    .escape(),
+  check("email", "Please include a valid email")
+    .optional()
+    .isEmail()
+    .normalizeEmail(),
+  check("phone", "Phone number must be valid").optional().isMobilePhone(),
+];
+
+// ================= ROUTES =================
 
 // @route   GET /api/contacts
-// @desc    Get all contacts for user
-router.get('/', protect, async (req, res) => {
-  try {
-    const {
-      page = 1,
-      limit = 20,
-      search = '',
-      sort = '-createdAt',
-      company,
-      tag
-    } = req.query;
-
-    // Build query
-    let query = { userId: req.user.id };
-
-    // Search functionality
-    if (search) {
-      query.$or = [
-        { firstName: { $regex: search, $options: 'i' } },
-        { lastName: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { company: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    // Filter by company
-    if (company) {
-      query.company = company;
-    }
-
-    // Filter by tag
-    if (tag) {
-      query.tags = tag;
-    }
-
-    // Execute query with pagination
-    const contacts = await Contact.find(query)
-      .sort(sort)
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
-
-    // Get total count for pagination
-    const total = await Contact.countDocuments(query);
-
-    res.json({
-      success: true,
-      data: contacts,
-      pagination: {
-        total,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        pages: Math.ceil(total / limit)
-      }
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
+// @desc    Get all contacts with pagination and filters
+// @access  Private
+router.get("/", protect, getContacts);
 
 // @route   GET /api/contacts/:id
-// @desc    Get single contact
-router.get('/:id', protect, async (req, res) => {
-  try {
-    const contact = await Contact.findOne({
-      _id: req.params.id,
-      userId: req.user.id
-    });
-
-    if (!contact) {
-      return res.status(404).json({ error: 'Contact not found' });
-    }
-
-    res.json({ success: true, data: contact });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
+// @desc    Get single contact by ID
+// @access  Private
+router.get("/:id", protect, getContactById);
 
 // @route   POST /api/contacts
 // @desc    Create new contact
-router.post(
-  '/',
-  protect,
-  [
-    check('firstName', 'First name is required').not().isEmpty(),
-    check('email', 'Please include a valid email').optional().isEmail()
-  ],
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
-    try {
-      const contactData = {
-        ...req.body,
-        userId: req.user.id
-      };
-
-      const contact = new Contact(contactData);
-      await contact.save();
-
-      res.status(201).json({ success: true, data: contact });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: 'Server error' });
-    }
-  }
-);
+// @access  Private
+router.post("/", protect, validate(createContactValidation), createContact);
 
 // @route   PUT /api/contacts/:id
 // @desc    Update contact
-router.put('/:id', protect, async (req, res) => {
-  try {
-    let contact = await Contact.findOne({
-      _id: req.params.id,
-      userId: req.user.id
-    });
+// @access  Private
+router.put("/:id", protect, validate(updateContactValidation), updateContact);
 
-    if (!contact) {
-      return res.status(404).json({ error: 'Contact not found' });
-    }
-
-    // Update contact
-    Object.assign(contact, req.body, { lastModified: Date.now() });
-    await contact.save();
-
-    res.json({ success: true, data: contact });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
+// @route   PATCH /api/contacts/:id/favorite
+// @desc    Toggle favorite status
+// @access  Private
+router.patch("/:id/favorite", protect, toggleFavorite);
 
 // @route   DELETE /api/contacts/:id
-// @desc    Delete contact
-router.delete('/:id', protect, async (req, res) => {
-  try {
-    const contact = await Contact.findOneAndDelete({
-      _id: req.params.id,
-      userId: req.user.id
-    });
-
-    if (!contact) {
-      return res.status(404).json({ error: 'Contact not found' });
-    }
-
-    res.json({ success: true, message: 'Contact deleted successfully' });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
+// @desc    Soft delete contact
+// @access  Private
+router.delete("/:id", protect, deleteContact);
 
 // @route   GET /api/contacts/stats/count
-// @desc    Get contact counts
-router.get('/stats/count', protect, async (req, res) => {
-  try {
-    const total = await Contact.countDocuments({ userId: req.user.id });
-    const recent = await Contact.countDocuments({
-      userId: req.user.id,
-      createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } // Last 7 days
-    });
+// @desc    Get contact statistics
+// @access  Private
+router.get("/stats/count", protect, getContactStats);
 
-    res.json({
-      success: true,
-      data: { total, recent }
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
+// @route   GET /api/contacts/stats/tags
+// @desc    Get tag statistics
+// @access  Private
+router.get("/stats/tags", protect, getTagStats);
 
 // @route   POST /api/contacts/batch
-// @desc    Sync multiple contacts (for offline sync)
-router.post('/batch', protect, async (req, res) => {
-  try {
-    const { contacts, lastSync } = req.body;
-    const results = {
-      created: [],
-      updated: [],
-      errors: []
-    };
+// @desc    Batch sync contacts
+// @access  Private
+router.post("/batch", protect, batchSyncContacts);
 
-    for (const contactData of contacts) {
-      try {
-        if (contactData._id) {
-          // Update existing contact
-          const contact = await Contact.findOne({
-            _id: contactData._id,
-            userId: req.user.id
-          });
+// @route   GET /api/contacts/export
+// @desc    Export contacts as CSV
+// @access  Private
+router.get("/export", protect, exportContacts);
 
-          if (contact) {
-            Object.assign(contact, contactData, { lastModified: Date.now() });
-            await contact.save();
-            results.updated.push(contact);
-          } else {
-            // Create new contact
-            const newContact = new Contact({
-              ...contactData,
-              userId: req.user.id,
-              _id: contactData._id
-            });
-            await newContact.save();
-            results.created.push(newContact);
-          }
-        } else {
-          // Create new contact
-          const newContact = new Contact({
-            ...contactData,
-            userId: req.user.id
-          });
-          await newContact.save();
-          results.created.push(newContact);
-        }
-      } catch (error) {
-        results.errors.push({
-          contact: contactData,
-          error: error.message
-        });
-      }
-    }
+// @route   GET /api/contacts/companies
+// @desc    Get unique companies for autocomplete
+// @access  Private
+router.get("/companies", protect, getCompanies);
 
-    res.json({
-      success: true,
-      data: results
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
+// @route   GET /api/contacts/tags
+// @desc    Get unique tags for autocomplete
+// @access  Private
+router.get("/tags", protect, getTags);
 
 module.exports = router;
