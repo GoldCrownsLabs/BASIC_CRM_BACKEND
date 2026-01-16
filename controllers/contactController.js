@@ -790,7 +790,4 @@ module.exports = {
   getContactStats,
   getTagStats,
   batchSyncContacts,
-  exportContacts,
-  getCompanies,
-  getTags,
 };

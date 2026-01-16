@@ -141,11 +141,13 @@ const authRoutes = require("./routes/auth");
 const leadRoutes = require("./routes/leads");
 const taskRoutes = require("./routes/tasks");
 const contactRoutes = require("./routes/contacts");
+const dashboardRoutes = require("./routes/dashboard")
 
 app.use("/api/auth", authRoutes);
 app.use("/api/leads", leadRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/contacts", contactRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 
 // ================= 404 HANDLER =================
 app.use((req, res) => {
