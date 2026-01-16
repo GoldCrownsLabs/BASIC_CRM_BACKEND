@@ -158,7 +158,7 @@ const getContactById = async (req, res) => {
 // @route   POST /api/contacts
 // @access  Private
 // ===============================
-const createContact = async (req, res) => {
+const createContact = async (req, res, next) => {
   try {
     // req.user comes from protect middleware
     if (!req.user || !req.user.id) {
@@ -773,139 +773,6 @@ const batchSyncContacts = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Server error while processing batch contacts",
-    });
-  }
-};
-
-// ===============================
-// @desc    Export contacts as CSV
-// @route   GET /api/contacts/export
-// @access  Private
-// ===============================
-const exportContacts = async (req, res) => {
-  try {
-    const contacts = await Contact.find({
-      userId: req.user.id,
-      isDeleted: false,
-    })
-      .select(
-        "firstName lastName email phone company jobTitle tags source createdAt"
-      )
-      .sort("lastName firstName");
-
-    // Convert to CSV
-    const headers = [
-      "First Name",
-      "Last Name",
-      "Email",
-      "Phone",
-      "Company",
-      "Job Title",
-      "Tags",
-      "Source",
-      "Created At",
-    ];
-
-    // Escape CSV values
-    const escapeCsv = (str) => {
-      if (str === null || str === undefined) return "";
-      const string = String(str);
-      if (
-        string.includes(",") ||
-        string.includes('"') ||
-        string.includes("\n")
-      ) {
-        return `"${string.replace(/"/g, '""')}"`;
-      }
-      return string;
-    };
-
-    const csvRows = [headers.join(",")];
-
-    contacts.forEach((contact) => {
-      const row = [
-        escapeCsv(contact.firstName),
-        escapeCsv(contact.lastName),
-        escapeCsv(contact.email),
-        escapeCsv(contact.phone),
-        escapeCsv(contact.company),
-        escapeCsv(contact.jobTitle),
-        escapeCsv((contact.tags || []).join(";")),
-        escapeCsv(contact.source),
-        escapeCsv(contact.createdAt.toISOString()),
-      ];
-      csvRows.push(row.join(","));
-    });
-
-    const csvContent = csvRows.join("\n");
-    const timestamp = new Date().toISOString().split("T")[0];
-
-    res.setHeader("Content-Type", "text/csv");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename=contacts_${timestamp}.csv`
-    );
-    res.send(csvContent);
-  } catch (error) {
-    console.error("Export error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error while exporting contacts",
-    });
-  }
-};
-
-// ===============================
-// @desc    Get unique companies for autocomplete
-// @route   GET /api/contacts/companies
-// @access  Private
-// ===============================
-const getCompanies = async (req, res) => {
-  try {
-    const companies = await Contact.distinct("company", {
-      userId: req.user.id,
-      isDeleted: false,
-      company: { $exists: true, $ne: "", $ne: null },
-    }).sort();
-
-    res.status(200).json({
-      success: true,
-      data: companies.filter((company) => company && company.trim()),
-    });
-  } catch (error) {
-    console.error("Get companies error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error while fetching companies",
-    });
-  }
-};
-
-// ===============================
-// @desc    Get unique tags for autocomplete
-// @route   GET /api/contacts/tags
-// @access  Private
-// ===============================
-const getTags = async (req, res) => {
-  try {
-    const tags = await Contact.distinct("tags", {
-      userId: req.user.id,
-      isDeleted: false,
-      tags: { $exists: true, $ne: [] },
-    });
-
-    // Flatten and deduplicate tags
-    const uniqueTags = [...new Set(tags.flat())].sort();
-
-    res.status(200).json({
-      success: true,
-      data: uniqueTags,
-    });
-  } catch (error) {
-    console.error("Get tags error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error while fetching tags",
     });
   }
 };
