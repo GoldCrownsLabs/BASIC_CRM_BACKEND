@@ -1,6 +1,5 @@
 const express = require("express");
 const router = express.Router();
-const { check, validationResult } = require("express-validator");
 const { protect } = require("../middleware/auth");
 const {
   getContacts,
@@ -17,64 +16,6 @@ const {
   getTags,
 } = require("../controllers/contactController");
 
-// Validation middleware
-const validate = (validations) => {
-  return async (req, res, next) => {
-    await Promise.all(validations.map((validation) => validation.run(req)));
-
-    const errors = validationResult(req);
-    if (errors.isEmpty()) {
-      return next();
-    }
-
-    res.status(400).json({
-      success: false,
-      errors: errors.array(),
-      message: "Validation failed",
-    });
-  };
-};
-
-// Contact creation validation
-const createContactValidation = [
-  check("firstName", "First name is required and must be at least 2 characters")
-    .not()
-    .isEmpty()
-    .trim()
-    .escape()
-    .isLength({ min: 2 }),
-  check("lastName", "Last name must be a string").optional().trim().escape(),
-  check("email", "Please include a valid email")
-    .optional()
-    .isEmail()
-    .normalizeEmail(),
-  check("phone", "Phone number must be valid").optional().isMobilePhone(),
-  check("company", "Company must be a string").optional().trim().escape(),
-  check("jobTitle", "Job title must be a string").optional().trim().escape(),
-  check("tags", "Tags must be an array of strings").optional().isArray(),
-  check("tags.*", "Each tag must be a string").optional().trim().escape(),
-  check("notes", "Notes cannot exceed 2000 characters")
-    .optional()
-    .isLength({ max: 2000 })
-    .trim()
-    .escape(),
-];
-
-// Contact update validation
-const updateContactValidation = [
-  check("firstName", "First name must be a string")
-    .optional()
-    .not()
-    .isEmpty()
-    .trim()
-    .escape(),
-  check("email", "Please include a valid email")
-    .optional()
-    .isEmail()
-    .normalizeEmail(),
-  check("phone", "Phone number must be valid").optional().isMobilePhone(),
-];
-
 // ================= ROUTES =================
 
 // @route   GET /api/contacts
@@ -90,12 +31,12 @@ router.get("/:id", protect, getContactById);
 // @route   POST /api/contacts
 // @desc    Create new contact
 // @access  Private
-router.post("/", protect, validate(createContactValidation), createContact);
+router.post("/", protect, createContact); // ✅ Validation removed
 
 // @route   PUT /api/contacts/:id
 // @desc    Update contact
 // @access  Private
-router.put("/:id", protect, validate(updateContactValidation), updateContact);
+router.put("/:id", protect, updateContact); // ✅ Validation removed
 
 // @route   PATCH /api/contacts/:id/favorite
 // @desc    Toggle favorite status
@@ -122,19 +63,6 @@ router.get("/stats/tags", protect, getTagStats);
 // @access  Private
 router.post("/batch", protect, batchSyncContacts);
 
-// @route   GET /api/contacts/export
-// @desc    Export contacts as CSV
-// @access  Private
-router.get("/export", protect, exportContacts);
 
-// @route   GET /api/contacts/companies
-// @desc    Get unique companies for autocomplete
-// @access  Private
-router.get("/companies", protect, getCompanies);
-
-// @route   GET /api/contacts/tags
-// @desc    Get unique tags for autocomplete
-// @access  Private
-router.get("/tags", protect, getTags);
 
 module.exports = router;

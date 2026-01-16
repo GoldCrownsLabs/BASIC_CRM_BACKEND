@@ -112,13 +112,23 @@ contactSchema.index({ userId: 1, isFavorite: 1 });
 contactSchema.index({ userId: 1, tags: 1 });
 contactSchema.index({ userId: 1, email: 1 });
 
-// Update timestamps on save
+// ✅ FIXED: Update timestamps on save (WITH SAFE CHECK)
 contactSchema.pre("save", function (next) {
   this.updatedAt = Date.now();
   if (this.isNew) {
     this.createdAt = Date.now();
   }
-  next();
+
+  // ✅ IMPORTANT FIX: Check if next is a function before calling
+  if (typeof next === "function") {
+    return next();
+  }
+
+  // If next is not a function, just continue (no error)
+  // This handles cases where hook is called from different contexts
+  console.warn(
+    "⚠️ Contact pre-save: next parameter not available, continuing..."
+  );
 });
 
 module.exports = mongoose.model("Contact", contactSchema);
