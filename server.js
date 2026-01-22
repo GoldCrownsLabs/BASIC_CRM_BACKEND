@@ -141,13 +141,15 @@ const authRoutes = require("./routes/auth");
 const leadRoutes = require("./routes/leads");
 const taskRoutes = require("./routes/tasks");
 const contactRoutes = require("./routes/contacts");
-const dashboardRoutes = require("./routes/dashboard")
+const dashboardRoutes = require("./routes/dashboard");
+const activitiesRoute = require("./routes/activities");
 
 app.use("/api/auth", authRoutes);
 app.use("/api/leads", leadRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/contacts", contactRoutes);
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/activities", activitiesRoute);
 
 // ================= 404 HANDLER =================
 app.use((req, res) => {
@@ -218,6 +220,21 @@ const server = app.listen(PORT, () => {
   console.log(`   Docs URL: http://localhost:${PORT}/api-docs`);
   console.log(`   Health Check: http://localhost:${PORT}/health\n`);
 });
+
+
+// Debug code
+console.log("🔍 DEBUG: Checking middleware...");
+try {
+  const authActivity = require("./middleware/authActivity");
+  console.log("✅ authActivity loaded");
+  console.log("Methods available:", Object.keys(authActivity));
+} catch (err) {
+  console.error("❌ Error loading authActivity:", err.message);
+  console.error(err.stack);
+}
+
+// ================= ROUTES =================
+// ... existing routes code ...
 
 // Graceful shutdown
 const gracefulShutdown = (signal) => {
