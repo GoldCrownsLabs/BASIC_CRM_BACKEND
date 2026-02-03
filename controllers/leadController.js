@@ -1,10 +1,16 @@
-const Lead = require('../models/Lead');
+const Lead = require("../models/Lead");
 
 // @desc    Create a new lead
 // @route   POST /api/leads
 // @access  Private
 exports.createLead = async (req, res) => {
   try {
+    console.log("=== CREATE LEAD DEBUG ===");
+    console.log("1. Request Body:", JSON.stringify(req.body, null, 2));
+    console.log("2. User from Auth:", req.user);
+    console.log("3. User ID:", req.user ? req.user.id : null);
+    console.log("========================");
+
     const {
       firstName,
       lastName,
@@ -18,18 +24,39 @@ exports.createLead = async (req, res) => {
       priority,
       assignedTo,
       nextFollowUp,
-      customFields
+      customFields,
     } = req.body;
 
-    // Check if lead with same email already exists
-    const existingLead = await Lead.findOne({ email });
-    if (existingLead) {
+    // Validation
+    if (!firstName || !email) {
+      console.log("❌ Missing required fields");
       return res.status(400).json({
         success: false,
-        error: 'Lead with this email already exists'
+        error: "First name and email are required",
       });
     }
 
+    // Check if user exists
+    if (!req.user || !req.user.id) {
+      console.log("❌ No user in request");
+      return res.status(401).json({
+        success: false,
+        error: "User not authenticated",
+      });
+    }
+
+    console.log("🔍 Checking for existing lead with email:", email);
+    const existingLead = await Lead.findOne({ email });
+
+    if (existingLead) {
+      console.log("❌ Lead already exists with email:", email);
+      return res.status(400).json({
+        success: false,
+        error: "Lead with this email already exists",
+      });
+    }
+
+    console.log("🔍 Creating new lead...");
     const lead = new Lead({
       firstName,
       lastName,
@@ -37,28 +64,59 @@ exports.createLead = async (req, res) => {
       phone,
       company,
       jobTitle,
-      source,
-      status: status || 'new',
+      source: source || "website",
+      status: status || "new",
       budget,
-      priority: priority || 'medium',
+      priority: priority || "medium",
       assignedTo,
       nextFollowUp,
       customFields,
-      createdBy: req.user.id
+      createdBy: req.user.id,
     });
 
+    console.log("🔍 Saving lead to database...");
     await lead.save();
+    console.log("✅ Lead saved successfully:", lead._id);
 
     res.status(201).json({
       success: true,
-      message: 'Lead created successfully',
-      data: lead
+      message: "Lead created successfully",
+      data: lead,
     });
   } catch (error) {
-    console.error('Create lead error:', error);
+    console.error("❌❌❌ CREATE LEAD ERROR DETAILS ❌❌❌");
+    console.error("Error Name:", error.name);
+    console.error("Error Message:", error.message);
+    console.error("Error Stack:", error.stack);
+
+    // Mongoose validation errors
+    if (error.name === "ValidationError") {
+      const errors = Object.values(error.errors).map((err) => err.message);
+      console.error("Validation Errors:", errors);
+      return res.status(400).json({
+        success: false,
+        error: "Validation failed",
+        details: errors,
+      });
+    }
+
+    // Duplicate key error
+    if (error.code === 11000) {
+      console.error("Duplicate key error:", error.keyValue);
+      return res.status(400).json({
+        success: false,
+        error: "Duplicate entry found",
+        field: Object.keys(error.keyValue)[0],
+      });
+    }
+
+    console.error("❌❌❌ END ERROR ❌❌❌");
+
     res.status(500).json({
       success: false,
-      error: 'Failed to create lead'
+      error: "Failed to create lead",
+      details:
+        process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
@@ -71,15 +129,15 @@ exports.getLeads = async (req, res) => {
     const {
       page = 1,
       limit = 10,
-      sortBy = 'createdAt',
-      sortOrder = 'desc',
+      sortBy = "createdAt",
+      sortOrder = "desc",
       status,
       source,
       priority,
       assignedTo,
       search,
       startDate,
-      endDate
+      endDate,
     } = req.query;
 
     // Build filter object
@@ -100,11 +158,11 @@ exports.getLeads = async (req, res) => {
     // Search filter
     if (search) {
       filter.$or = [
-        { firstName: { $regex: search, $options: 'i' } },
-        { lastName: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { company: { $regex: search, $options: 'i' } },
-        { jobTitle: { $regex: search, $options: 'i' } }
+        { firstName: { $regex: search, $options: "i" } },
+        { lastName: { $regex: search, $options: "i" } },
+        { email: { $regex: search, $options: "i" } },
+        { company: { $regex: search, $options: "i" } },
+        { jobTitle: { $regex: search, $options: "i" } },
       ];
     }
 
@@ -116,16 +174,29 @@ exports.getLeads = async (req, res) => {
 
     // Fetch leads with pagination and sorting
     const leads = await Lead.find(filter)
-      .populate('assignedTo', 'name email')
-      .populate('createdBy', 'name email')
-      .sort({ [sortBy]: sortOrder === 'desc' ? -1 : 1 })
+      .populate("assignedTo", "name email")
+      .populate("createdBy", "name email")
+      .sort({
+        [sortBy]: sortOrder === "desc" ? -1 : 1,
+      })
       .skip(skip)
       .limit(parseInt(limit));
 
     // Get statistics
     const stats = await Lead.aggregate([
-      { $group: { _id: '$status', count: { $sum: 1 } } }
+      { $group: { _id: "$status", count: { $sum: 1 } } },
     ]);
+
+    // Get distinct values for filters
+    const statusValues = await Lead.distinct("status");
+    const sourceValues = await Lead.distinct("source");
+    const priorityValues = await Lead.distinct("priority");
+
+    // Convert stats array to object
+    const statsObj = {};
+    stats.forEach((item) => {
+      statsObj[item._id] = item.count;
+    });
 
     res.json({
       success: true,
@@ -134,23 +205,20 @@ exports.getLeads = async (req, res) => {
         currentPage: parseInt(page),
         totalPages: Math.ceil(total / limit),
         totalItems: total,
-        itemsPerPage: parseInt(limit)
+        itemsPerPage: parseInt(limit),
       },
-      stats: stats.reduce((acc, curr) => {
-        acc[curr._id] = curr.count;
-        return acc;
-      }, {}),
+      stats: statsObj,
       filters: {
-        status: [...new Set(await Lead.distinct('status'))],
-        source: [...new Set(await Lead.distinct('source'))],
-        priority: [...new Set(await Lead.distinct('priority'))]
-      }
+        status: [...new Set(statusValues)],
+        source: [...new Set(sourceValues)],
+        priority: [...new Set(priorityValues)],
+      },
     });
   } catch (error) {
-    console.error('Get leads error:', error);
+    console.error("Get leads error:", error);
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch leads'
+      error: "Failed to fetch leads",
     });
   }
 };
@@ -161,26 +229,26 @@ exports.getLeads = async (req, res) => {
 exports.getLeadById = async (req, res) => {
   try {
     const lead = await Lead.findById(req.params.id)
-      .populate('assignedTo', 'name email avatar')
-      .populate('createdBy', 'name email')
-      .populate('notes.createdBy', 'name email');
+      .populate("assignedTo", "name email avatar")
+      .populate("createdBy", "name email")
+      .populate("notes.createdBy", "name email");
 
     if (!lead) {
       return res.status(404).json({
         success: false,
-        error: 'Lead not found'
+        error: "Lead not found",
       });
     }
 
     res.json({
       success: true,
-      data: lead
+      data: lead,
     });
   } catch (error) {
-    console.error('Get lead by ID error:', error);
+    console.error("Get lead by ID error:", error);
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch lead'
+      error: "Failed to fetch lead",
     });
   }
 };
@@ -203,7 +271,7 @@ exports.updateLead = async (req, res) => {
       priority,
       assignedTo,
       nextFollowUp,
-      customFields
+      customFields,
     } = req.body;
 
     const lead = await Lead.findById(req.params.id);
@@ -211,7 +279,7 @@ exports.updateLead = async (req, res) => {
     if (!lead) {
       return res.status(404).json({
         success: false,
-        error: 'Lead not found'
+        error: "Lead not found",
       });
     }
 
@@ -221,7 +289,7 @@ exports.updateLead = async (req, res) => {
       if (existingLead && existingLead._id.toString() !== req.params.id) {
         return res.status(400).json({
           success: false,
-          error: 'Another lead with this email already exists'
+          error: "Another lead with this email already exists",
         });
       }
     }
@@ -246,19 +314,19 @@ exports.updateLead = async (req, res) => {
     const updatedLead = await Lead.findByIdAndUpdate(
       req.params.id,
       updateFields,
-      { new: true, runValidators: true }
-    ).populate('assignedTo', 'name email');
+      { new: true, runValidators: true },
+    ).populate("assignedTo", "name email");
 
     res.json({
       success: true,
-      message: 'Lead updated successfully',
-      data: updatedLead
+      message: "Lead updated successfully",
+      data: updatedLead,
     });
   } catch (error) {
-    console.error('Update lead error:', error);
+    console.error("Update lead error:", error);
     res.status(500).json({
       success: false,
-      error: 'Failed to update lead'
+      error: "Failed to update lead",
     });
   }
 };
@@ -273,7 +341,7 @@ exports.deleteLead = async (req, res) => {
     if (!lead) {
       return res.status(404).json({
         success: false,
-        error: 'Lead not found'
+        error: "Lead not found",
       });
     }
 
@@ -281,13 +349,13 @@ exports.deleteLead = async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Lead deleted successfully'
+      message: "Lead deleted successfully",
     });
   } catch (error) {
-    console.error('Delete lead error:', error);
+    console.error("Delete lead error:", error);
     res.status(500).json({
       success: false,
-      error: 'Failed to delete lead'
+      error: "Failed to delete lead",
     });
   }
 };
@@ -299,10 +367,10 @@ exports.addNote = async (req, res) => {
   try {
     const { content } = req.body;
 
-    if (!content || content.trim() === '') {
+    if (!content || content.trim() === "") {
       return res.status(400).json({
         success: false,
-        error: 'Note content is required'
+        error: "Note content is required",
       });
     }
 
@@ -311,25 +379,27 @@ exports.addNote = async (req, res) => {
     if (!lead) {
       return res.status(404).json({
         success: false,
-        error: 'Lead not found'
+        error: "Lead not found",
       });
     }
 
     await lead.addNote(content.trim(), req.user.id);
 
-    const updatedLead = await Lead.findById(req.params.id)
-      .populate('notes.createdBy', 'name email');
+    const updatedLead = await Lead.findById(req.params.id).populate(
+      "notes.createdBy",
+      "name email",
+    );
 
     res.json({
       success: true,
-      message: 'Note added successfully',
-      data: updatedLead.notes
+      message: "Note added successfully",
+      data: updatedLead.notes,
     });
   } catch (error) {
-    console.error('Add note error:', error);
+    console.error("Add note error:", error);
     res.status(500).json({
       success: false,
-      error: 'Failed to add note'
+      error: "Failed to add note",
     });
   }
 };
@@ -346,7 +416,7 @@ exports.updateLeadStatus = async (req, res) => {
     if (!lead) {
       return res.status(404).json({
         success: false,
-        error: 'Lead not found'
+        error: "Lead not found",
       });
     }
 
@@ -356,14 +426,14 @@ exports.updateLeadStatus = async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Lead status updated successfully',
-      data: updatedLead
+      message: "Lead status updated successfully",
+      data: updatedLead,
     });
   } catch (error) {
-    console.error('Update status error:', error);
+    console.error("Update status error:", error);
     res.status(500).json({
       success: false,
-      error: 'Failed to update lead status'
+      error: "Failed to update lead status",
     });
   }
 };
@@ -374,18 +444,18 @@ exports.updateLeadStatus = async (req, res) => {
 exports.getMyLeads = async (req, res) => {
   try {
     const leads = await Lead.find({ assignedTo: req.user.id })
-      .populate('createdBy', 'name email')
+      .populate("createdBy", "name email")
       .sort({ priority: -1, createdAt: -1 });
 
     res.json({
       success: true,
-      data: leads
+      data: leads,
     });
   } catch (error) {
-    console.error('Get my leads error:', error);
+    console.error("Get my leads error:", error);
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch your leads'
+      error: "Failed to fetch your leads",
     });
   }
 };
@@ -398,34 +468,33 @@ exports.getLeadStats = async (req, res) => {
     const stats = await Lead.aggregate([
       {
         $facet: {
-          totalLeads: [
-            { $count: 'count' }
-          ],
-          leadsByStatus: [
-            { $group: { _id: '$status', count: { $sum: 1 } } }
-          ],
-          leadsBySource: [
-            { $group: { _id: '$source', count: { $sum: 1 } } }
-          ],
+          totalLeads: [{ $count: "count" }],
+          leadsByStatus: [{ $group: { _id: "$status", count: { $sum: 1 } } }],
+          leadsBySource: [{ $group: { _id: "$source", count: { $sum: 1 } } }],
           leadsByPriority: [
-            { $group: { _id: '$priority', count: { $sum: 1 } } }
+            { $group: { _id: "$priority", count: { $sum: 1 } } },
           ],
           leadsByMonth: [
             {
               $group: {
                 _id: {
-                  year: { $year: '$createdAt' },
-                  month: { $month: '$createdAt' }
+                  year: { $year: "$createdAt" },
+                  month: { $month: "$createdAt" },
                 },
-                count: { $sum: 1 }
-              }
+                count: { $sum: 1 },
+              },
             },
-            { $sort: { '_id.year': -1, '_id.month': -1 } },
-            { $limit: 6 }
+            { $sort: { "_id.year": -1, "_id.month": -1 } },
+            { $limit: 6 },
           ],
           hotLeads: [
-            { $match: { priority: 'high', status: { $in: ['new', 'contacted', 'qualified'] } } },
-            { $count: 'count' }
+            {
+              $match: {
+                priority: "high",
+                status: { $in: ["new", "contacted", "qualified"] },
+              },
+            },
+            { $count: "count" },
           ],
           conversionRate: [
             {
@@ -433,39 +502,66 @@ exports.getLeadStats = async (req, res) => {
                 _id: null,
                 total: { $sum: 1 },
                 converted: {
-                  $sum: { $cond: [{ $eq: ['$status', 'closed_won'] }, 1, 0] }
-                }
-              }
-            }
-          ]
-        }
-      }
+                  $sum: { $cond: [{ $eq: ["$status", "closed_won"] }, 1, 0] },
+                },
+              },
+            },
+          ],
+        },
+      },
     ]);
 
-    // Process the results
+    // Safely process the results
     const result = {
-      totalLeads: stats[0].totalLeads[0]?.count || 0,
-      leadsByStatus: stats[0].leadsByStatus,
-      leadsBySource: stats[0].leadsBySource,
-      leadsByPriority: stats[0].leadsByPriority,
-      leadsByMonth: stats[0].leadsByMonth.map(item => ({
-        month: `${item._id.year}-${item._id.month.toString().padStart(2, '0')}`,
-        count: item.count
-      })),
-      hotLeads: stats[0].hotLeads[0]?.count || 0,
-      conversionRate: stats[0].conversionRate[0] ? 
-        (stats[0].conversionRate[0].converted / stats[0].conversionRate[0].total * 100).toFixed(2) : '0.00'
+      totalLeads:
+        stats && stats[0] && stats[0].totalLeads && stats[0].totalLeads[0]
+          ? stats[0].totalLeads[0].count
+          : 0,
+      leadsByStatus:
+        stats && stats[0] && stats[0].leadsByStatus
+          ? stats[0].leadsByStatus
+          : [],
+      leadsBySource:
+        stats && stats[0] && stats[0].leadsBySource
+          ? stats[0].leadsBySource
+          : [],
+      leadsByPriority:
+        stats && stats[0] && stats[0].leadsByPriority
+          ? stats[0].leadsByPriority
+          : [],
+      leadsByMonth:
+        stats && stats[0] && stats[0].leadsByMonth
+          ? stats[0].leadsByMonth.map((item) => ({
+              month: `${item._id.year}-${item._id.month.toString().padStart(2, "0")}`,
+              count: item.count,
+            }))
+          : [],
+      hotLeads:
+        stats && stats[0] && stats[0].hotLeads && stats[0].hotLeads[0]
+          ? stats[0].hotLeads[0].count
+          : 0,
+      conversionRate:
+        stats &&
+        stats[0] &&
+        stats[0].conversionRate &&
+        stats[0].conversionRate[0]
+          ? (
+              (stats[0].conversionRate[0].converted /
+                stats[0].conversionRate[0].total) *
+              100
+            ).toFixed(2)
+          : "0.00",
     };
 
     res.json({
       success: true,
-      data: result
+      data: result,
     });
   } catch (error) {
-    console.error('Get lead stats error:', error);
+    console.error("Get lead stats error:", error);
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch lead statistics'
+      error: "Failed to fetch lead statistics",
     });
   }
 };
@@ -480,21 +576,21 @@ exports.bulkUpdateLeads = async (req, res) => {
     if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
       return res.status(400).json({
         success: false,
-        error: 'Lead IDs are required'
+        error: "Lead IDs are required",
       });
     }
 
     if (!updateFields || Object.keys(updateFields).length === 0) {
       return res.status(400).json({
         success: false,
-        error: 'Update fields are required'
+        error: "Update fields are required",
       });
     }
 
-    const allowedFields = ['status', 'assignedTo', 'priority', 'source'];
+    const allowedFields = ["status", "assignedTo", "priority", "source"];
     const filteredUpdateFields = {};
 
-    Object.keys(updateFields).forEach(key => {
+    Object.keys(updateFields).forEach((key) => {
       if (allowedFields.includes(key)) {
         filteredUpdateFields[key] = updateFields[key];
       }
@@ -502,7 +598,7 @@ exports.bulkUpdateLeads = async (req, res) => {
 
     const result = await Lead.updateMany(
       { _id: { $in: leadIds } },
-      { $set: filteredUpdateFields }
+      { $set: filteredUpdateFields },
     );
 
     res.json({
@@ -510,14 +606,14 @@ exports.bulkUpdateLeads = async (req, res) => {
       message: `Successfully updated ${result.modifiedCount} leads`,
       data: {
         matched: result.matchedCount,
-        modified: result.modifiedCount
-      }
+        modified: result.modifiedCount,
+      },
     });
   } catch (error) {
-    console.error('Bulk update error:', error);
+    console.error("Bulk update error:", error);
     res.status(500).json({
       success: false,
-      error: 'Failed to bulk update leads'
+      error: "Failed to bulk update leads",
     });
   }
 };

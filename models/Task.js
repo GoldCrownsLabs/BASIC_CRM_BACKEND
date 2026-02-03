@@ -1,3 +1,4 @@
+// models/Task.js
 const mongoose = require("mongoose");
 
 const taskSchema = new mongoose.Schema(
@@ -33,18 +34,12 @@ const taskSchema = new mongoose.Schema(
     },
     priority: {
       type: String,
-      enum: {
-        values: ["low", "medium", "high", "urgent"],
-        message: "Priority must be low, medium, high, or urgent",
-      },
+      enum: ["low", "medium", "high", "urgent"],
       default: "medium",
     },
     status: {
       type: String,
-      enum: {
-        values: ["pending", "in_progress", "completed", "cancelled"],
-        message: "Status must be pending, in_progress, completed, or cancelled",
-      },
+      enum: ["pending", "in_progress", "completed", "cancelled"],
       default: "pending",
     },
     dueDate: {
@@ -61,10 +56,16 @@ const taskSchema = new mongoose.Schema(
     completedAt: {
       type: Date,
     },
-    syncStatus: {
-      type: String,
-      enum: ["synced", "pending", "failed"],
-      default: "synced",
+    assignedTo: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+    // Add metadata field for additional frontend data
+    metadata: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
     },
     lastModified: {
       type: Date,
@@ -77,21 +78,8 @@ const taskSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
-// Remove the problematic pre-save middleware or fix it
-taskSchema.pre("save", function (next) {
-  try {
-    this.lastModified = new Date();
-    // Make sure to call next() correctly
-    if (typeof next === "function") {
-      next();
-    }
-  } catch (error) {
-    // If next is not a function, just continue
-    console.error("Pre-save middleware error:", error);
-  }
-});
 
 module.exports = mongoose.model("Task", taskSchema);
