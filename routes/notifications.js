@@ -1,32 +1,33 @@
-// routes/notifications.js
+// routes/notifications.js - CORRECTED VERSION
 const express = require("express");
 const router = express.Router();
+const { protect } = require("../middleware/auth");
 const notificationController = require("../controllers/notificationController");
-const auth = require("../middleware/auth"); // Assuming you have auth middleware
 
-// All routes require authentication
-router.use(auth);
+// ✅ APPLY PROTECT MIDDLEWARE TO ALL ROUTES
+router.use(protect); // ✅ USE protect NOT auth
 
-// Get notifications
+// Routes - Now all routes are protected
 router.get("/", notificationController.getNotifications);
-
-// Mark as read
 router.patch("/:id/read", notificationController.markAsRead);
-
-// Mark all as read
 router.patch("/mark-all-read", notificationController.markAllAsRead);
-
-// Delete notification
 router.delete("/:id", notificationController.deleteNotification);
-
-// Push token
 router.post("/push-token", notificationController.updatePushToken);
-
-// Settings
 router.get("/settings", notificationController.getNotificationSettings);
 router.put("/settings", notificationController.updateNotificationSettings);
-
-// Test
 router.post("/test", notificationController.sendTestNotification);
+
+// Add these routes if they exist in controller
+if (notificationController.getNotificationStats) {
+  router.get("/stats", notificationController.getNotificationStats);
+}
+
+if (notificationController.clearAllNotifications) {
+  router.delete("/", notificationController.clearAllNotifications);
+}
+
+if (notificationController.getNotificationById) {
+  router.get("/:id", notificationController.getNotificationById);
+}
 
 module.exports = router;

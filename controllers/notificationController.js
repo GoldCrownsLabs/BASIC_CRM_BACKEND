@@ -1,11 +1,22 @@
 // controllers/notificationController.js
 const NotificationService = require("../services/notificationService");
 const User = require("../models/User");
+const Notification = require("../models/Notification");
 
-// Get user notifications
 exports.getNotifications = async (req, res) => {
   try {
-    const { page = 1, limit = 20, unread } = req.query;
+    console.log('🔍 DEBUG: Notification request from user:', req.user?._id);
+    
+    if (!req.user || !req.user._id) {
+      console.error('❌ ERROR: User not authenticated in notification controller');
+      return res.status(401).json({
+        success: false,
+        error: "User not authenticated",
+        debug: "Check if protect middleware is working"
+      });
+    }
+
+    const { page = 1, limit = 20, unread, type } = req.query;
     const skip = (page - 1) * limit;
 
     const result = await NotificationService.getUserNotifications(
@@ -14,9 +25,12 @@ exports.getNotifications = async (req, res) => {
         limit: parseInt(limit),
         skip,
         unreadOnly: unread === "true",
+        type: type || undefined,
       },
     );
 
+    console.log(`✅ Fetched ${result.notifications?.length || 0} notifications for user ${req.user._id}`);
+    
     res.json({
       success: true,
       ...result,
@@ -76,13 +90,13 @@ exports.markAllAsRead = async (req, res) => {
   }
 };
 
-// Delete notification
+// Delete notification - UPDATED to use Service
 exports.deleteNotification = async (req, res) => {
   try {
-    const notification = await Notification.findOneAndDelete({
-      _id: req.params.id,
-      userId: req.user._id,
-    });
+    const notification = await NotificationService.deleteNotification(
+      req.params.id,
+      req.user._id,
+    );
 
     if (!notification) {
       return res.status(404).json({
@@ -91,19 +105,9 @@ exports.deleteNotification = async (req, res) => {
       });
     }
 
-    // Update badge count
-    const unreadCount = await Notification.countDocuments({
-      userId: req.user._id,
-      read: false,
-    });
-
-    await User.findByIdAndUpdate(req.user._id, {
-      notificationBadgeCount: unreadCount,
-    });
-
     res.json({
       success: true,
-      message: "Notification deleted",
+      message: "Notification deleted successfully",
     });
   } catch (error) {
     console.error("Delete notification error:", error);
@@ -214,6 +218,71 @@ exports.sendTestNotification = async (req, res) => {
     res.status(500).json({
       success: false,
       error: "Failed to send test notification",
+    });
+  }
+};
+
+// NEW METHODS TO ADD
+exports.getNotificationStats = async (req, res) => {
+  try {
+    const stats = await NotificationService.getNotificationStats(req.user._id);
+    res.json({ success: true, stats });
+  } catch (error) {
+    console.error("Get stats error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch notification statistics",
+    });
+  }
+};
+
+exports.clearAllNotifications = async (req, res) => {
+  try {
+    await Notification.deleteMany({ userId: req.user._id });
+    await User.findByIdAndUpdate(req.user._id, {
+      notificationBadgeCount: 0,
+    });
+
+    res.json({
+      success: true,
+      message: "All notifications cleared",
+    });
+  } catch (error) {
+    console.error("Clear all error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to clear notifications",
+    });
+  }
+};
+
+// Get notification by ID
+exports.getNotificationById = async (req, res) => {
+  try {
+    const notification = await Notification.findOne({
+      _id: req.params.id,
+      userId: req.user._id,
+    });
+
+    if (!notification) {
+      return res.status(404).json({
+        success: false,
+        error: "Notification not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      notification: {
+        ...notification.toObject(),
+        timeAgo: notification.timeAgo, // Use virtual field
+      },
+    });
+  } catch (error) {
+    console.error("Get notification by ID error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch notification",
     });
   }
 };

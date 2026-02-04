@@ -2,8 +2,9 @@ const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const mongoose = require("mongoose");
-const morgan = require("morgan"); // Optional: for request logging
-const helmet = require("helmet"); // Optional: for security headers
+const morgan = require("morgan");
+const helmet = require("helmet");
+const http = require("http");
 
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./config/swagger");
@@ -14,12 +15,20 @@ dotenv.config();
 // Initialize Express app
 const app = express();
 
+// Create HTTP server
+const server = http.createServer(app); // ✅ MOVE THIS UP
+
+// ================= SOCKET.IO SETUP =================
+const { initSocket } = require("./socket/socket");
+const io = initSocket(server);
+global.io = io;
+
 // ================= MIDDLEWARE =================
 app.use(
   cors({
     origin: process.env.CORS_ORIGIN || "*",
     credentials: true,
-  })
+  }),
 );
 app.use(helmet()); // Security headers
 app.use(morgan("combined")); // Request logging
@@ -39,11 +48,11 @@ const connectDB = async () => {
 
     console.log(
       "Connecting to:",
-      process.env.MONGO_URI.substring(0, 50) + "..."
+      process.env.MONGO_URI.substring(0, 50) + "...",
     );
 
     const conn = await mongoose.connect(process.env.MONGO_URI, {
-      serverSelectionTimeoutMS: 10000, // Increased timeout
+      serverSelectionTimeoutMS: 10000,
       socketTimeoutMS: 45000,
       maxPoolSize: 10,
     });
@@ -98,7 +107,7 @@ app.use(
     explorer: true,
     customCss: ".swagger-ui .topbar { display: none }",
     customSiteTitle: "CRM API Documentation",
-  })
+  }),
 );
 
 // ================= HEALTH CHECK =================
@@ -143,6 +152,7 @@ const taskRoutes = require("./routes/tasks");
 const contactRoutes = require("./routes/contacts");
 const dashboardRoutes = require("./routes/dashboard");
 const activitiesRoute = require("./routes/activities");
+const notificationRoutes = require("./routes/notifications");
 
 app.use("/api/auth", authRoutes);
 app.use("/api/leads", leadRoutes);
@@ -150,6 +160,7 @@ app.use("/api/tasks", taskRoutes);
 app.use("/api/contacts", contactRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/activities", activitiesRoute);
+app.use("/api/notifications", notificationRoutes);
 
 // ================= 404 HANDLER =================
 app.use((req, res) => {
@@ -210,18 +221,6 @@ process.on("uncaughtException", (error) => {
   }
 });
 
-// ================= SERVER START =================
-const PORT = process.env.PORT || 5000;
-const server = app.listen(PORT, () => {
-  console.log(`\n🚀 Server Information:`);
-  console.log(`   Port: ${PORT}`);
-  console.log(`   Environment: ${process.env.NODE_ENV || "development"}`);
-  console.log(`   API URL: http://localhost:${PORT}`);
-  console.log(`   Docs URL: http://localhost:${PORT}/api-docs`);
-  console.log(`   Health Check: http://localhost:${PORT}/health\n`);
-});
-
-
 // Debug code
 console.log("🔍 DEBUG: Checking middleware...");
 try {
@@ -233,10 +232,19 @@ try {
   console.error(err.stack);
 }
 
-// ================= ROUTES =================
-// ... existing routes code ...
+const PORT = process.env.PORT || 5000;
 
-// Graceful shutdown
+// ✅ UPDATE TO THIS:
+server.listen(PORT, () => {
+  console.log(`\n🚀 Server Information:`);
+  console.log(`   Port: ${PORT}`);
+  console.log(`   Environment: ${process.env.NODE_ENV || "development"}`);
+  console.log(`   API URL: http://localhost:${PORT}`);
+  console.log(`   Docs URL: http://localhost:${PORT}/api-docs`);
+  console.log(`   Health Check: http://localhost:${PORT}/health`);
+  console.log(`   Socket.IO: http://localhost:${PORT} (WebSocket enabled)\n`);
+});
+
 const gracefulShutdown = (signal) => {
   console.log(`\n⚠️  Received ${signal}. Starting graceful shutdown...`);
 
@@ -249,18 +257,15 @@ const gracefulShutdown = (signal) => {
     });
   });
 
-  // Force shutdown after 10 seconds
   setTimeout(() => {
     console.error(
-      "❌ Could not close connections in time, forcefully shutting down"
+      "❌ Could not close connections in time, forcefully shutting down",
     );
     process.exit(1);
   }, 10000);
 };
 
-// Listen for shutdown signals
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
-// Export for testing (if needed)
-module.exports = app;
+module.exports = { app, server, io };
