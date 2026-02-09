@@ -3,6 +3,41 @@ const Activity = require("../models/Activity");
 const Contact = require("../models/Contact");
 const Lead = require("../models/Lead");
 
+// Helper function to convert 12h to 24h format
+const convertTo24Hour = (time12h) => {
+  if (!time12h) return "00:00";
+
+  const timeStr = time12h.trim().toUpperCase();
+
+  // Handle formats like "2:30 PM", "02:30 PM", "2:30PM"
+  let time = timeStr;
+  let modifier = "AM";
+
+  // Check if contains AM/PM
+  if (timeStr.includes("AM") || timeStr.includes("PM")) {
+    const parts = timeStr.split(/(AM|PM)/);
+    time = parts[0].trim();
+    modifier = parts[1];
+  }
+
+  // Handle different time formats
+  let [hours, minutes = "00"] = time.split(":");
+
+  // Clean up hours
+  hours = hours.replace(/\D/g, "");
+  hours = parseInt(hours, 10);
+
+  // Convert to 24-hour format
+  if (modifier === "PM" && hours < 12) {
+    hours += 12;
+  } else if (modifier === "AM" && hours === 12) {
+    hours = 0;
+  }
+
+  // Format to two digits
+  return `${hours.toString().padStart(2, "0")}:${minutes.padStart(2, "0")}`;
+};
+
 const activityController = {
   // @desc    Get all activities for current user
   // @route   GET /api/activities
@@ -107,10 +142,62 @@ const activityController = {
   // @access  Private
   createActivity: async (req, res) => {
     try {
-      // Add userId to request body
-      req.body.userId = req.user.id;
+      const { date, time, ...otherFields } = req.body;
 
-      const activity = await Activity.create(req.body);
+      // Combine date and time into a proper Date object
+      let combinedDate;
+
+      if (date && time) {
+        try {
+          // Convert time to 24-hour format
+          const time24 = convertTo24Hour(time);
+
+          // Create date string in ISO format (YYYY-MM-DDTHH:mm:00)
+          // Handle date format variations
+          let formattedDate;
+          if (date.includes("-")) {
+            formattedDate = date; // Already YYYY-MM-DD
+          } else if (date.includes("/")) {
+            // Convert MM/DD/YYYY to YYYY-MM-DD
+            const [month, day, year] = date.split("/");
+            formattedDate = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+          } else {
+            formattedDate = date; // Fallback
+          }
+
+          // Create the combined date string
+          const dateTimeString = `${formattedDate}T${time24}:00`;
+
+          // Create Date object - specify it's local time
+          combinedDate = new Date(dateTimeString);
+
+          // Validate the date
+          if (isNaN(combinedDate.getTime())) {
+            throw new Error("Invalid date/time combination");
+          }
+        } catch (error) {
+          console.error("Date parsing error:", error);
+          // Fallback to just date at noon
+          combinedDate = new Date(`${date}T12:00:00`);
+        }
+      } else if (date) {
+        // If only date is provided, set to noon
+        combinedDate = new Date(`${date}T12:00:00`);
+      } else {
+        // If no date provided, use current date/time
+        combinedDate = new Date();
+      }
+
+      // Create activity data
+      const activityData = {
+        ...otherFields,
+        date: combinedDate,
+        time: time, // Store original time string as well if needed
+        userId: req.user.id,
+      };
+
+      // Create activity
+      const activity = await Activity.create(activityData);
 
       // If linked to contact, update contact's lastActivity
       if (activity.contactId) {
@@ -134,6 +221,7 @@ const activityController = {
         data: activity,
       });
     } catch (error) {
+      console.error("Create activity error:", error);
       res.status(500).json({
         success: false,
         message: "Error creating activity",
@@ -147,16 +235,54 @@ const activityController = {
   // @access  Private
   updateActivity: async (req, res) => {
     try {
+      const { date, time, ...otherFields } = req.body;
+
       // Don't allow userId change
-      delete req.body.userId;
+      delete otherFields.userId;
 
       // Update lastModified
-      req.body.lastModified = Date.now();
+      otherFields.lastModified = Date.now();
+
+      // Handle date/time combination if provided
+      if (date || time) {
+        const existingActivity = await Activity.findById(req.params.id);
+        let newDate;
+
+        if (date && time) {
+          // Both date and time are being updated
+          const time24 = convertTo24Hour(time);
+          const dateTimeString = `${date}T${time24}:00`;
+          newDate = new Date(dateTimeString);
+        } else if (date && existingActivity) {
+          // Only date is being updated, keep existing time
+          const existingTime = existingActivity.time || "12:00";
+          const time24 = convertTo24Hour(existingTime);
+          const dateTimeString = `${date}T${time24}:00`;
+          newDate = new Date(dateTimeString);
+          otherFields.time = existingTime;
+        } else if (time && existingActivity) {
+          // Only time is being updated, keep existing date
+          const existingDate = existingActivity.date;
+          const year = existingDate.getFullYear();
+          const month = (existingDate.getMonth() + 1)
+            .toString()
+            .padStart(2, "0");
+          const day = existingDate.getDate().toString().padStart(2, "0");
+          const time24 = convertTo24Hour(time);
+          const dateTimeString = `${year}-${month}-${day}T${time24}:00`;
+          newDate = new Date(dateTimeString);
+          otherFields.time = time;
+        }
+
+        if (newDate && !isNaN(newDate.getTime())) {
+          otherFields.date = newDate;
+        }
+      }
 
       const activity = await Activity.findByIdAndUpdate(
         req.params.id,
-        req.body,
-        { new: true, runValidators: true }
+        otherFields,
+        { new: true, runValidators: true },
       )
         .populate("contactId", "firstName lastName")
         .populate("leadId", "firstName lastName");
@@ -174,6 +300,7 @@ const activityController = {
         data: activity,
       });
     } catch (error) {
+      console.error("Update activity error:", error);
       res.status(500).json({
         success: false,
         message: "Error updating activity",
@@ -368,7 +495,7 @@ const activityController = {
           isCompleted: true,
           lastModified: Date.now(),
         },
-        { new: true }
+        { new: true },
       );
 
       if (!activity) {

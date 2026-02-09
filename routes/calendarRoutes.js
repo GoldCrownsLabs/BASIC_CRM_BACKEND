@@ -235,5 +235,79 @@ router.post("/test-notification", protect, async (req, res) => {
   }
 });
 
+router.get("/types", protect, async (req, res) => {
+  try {
+    let EventType;
+    try {
+      EventType = require("../models/EventType");
+    } catch (error) {
+      // If EventType model doesn't exist, return default data
+      console.warn("EventType model not found, returning default types");
+      return res.json({
+        success: true,
+        data: [
+          {
+            _id: "1",
+            name: "Meeting",
+            color: "#3B82F6",
+            icon: "users",
+            isActive: true,
+            order: 1,
+          },
+          {
+            _id: "2",
+            name: "Appointment",
+            color: "#10B981",
+            icon: "calendar",
+            isActive: true,
+            order: 2,
+          },
+          {
+            _id: "3",
+            name: "Task",
+            color: "#F59E0B",
+            icon: "check-circle",
+            isActive: true,
+            order: 3,
+          },
+          {
+            _id: "4",
+            name: "Reminder",
+            color: "#EF4444",
+            icon: "bell",
+            isActive: true,
+            order: 4,
+          },
+          {
+            _id: "5",
+            name: "Personal",
+            color: "#8B5CF6",
+            icon: "user",
+            isActive: true,
+            order: 5,
+          },
+        ],
+      });
+    }
+
+    const types = await EventType.find({ isActive: true }).sort("order");
+    res.json({
+      success: true,
+      data: types,
+    });
+  } catch (error) {
+    console.error("Get event types error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch event types",
+      // Optional: Add default data as fallback
+      fallbackData: [
+        { _id: "1", name: "Meeting", color: "#3B82F6", icon: "users" },
+        { _id: "2", name: "Appointment", color: "#10B981", icon: "calendar" },
+        { _id: "3", name: "Task", color: "#F59E0B", icon: "check-circle" },
+      ],
+    });
+  }
+});
 
 module.exports = router;
