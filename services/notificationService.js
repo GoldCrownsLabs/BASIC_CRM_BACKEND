@@ -74,11 +74,12 @@ class NotificationService {
         badge: await this.getUserBadgeCount(user._id),
         ...(process.env.NODE_ENV === "production" && {
           priority: "high",
-          ttl: 60 * 60 * 24, // 24 hours
+          ttl: 60 * 60 * 24,
         }),
       };
 
       // Remove null/undefined values
+      
       Object.keys(message).forEach(
         (key) => message[key] == null && delete message[key],
       );
