@@ -33,6 +33,8 @@ const activitySchema = new mongoose.Schema({
     required: true,
     default: Date.now
   },
+
+  
   duration: {
     type: Number, // in minutes
     min: 0
