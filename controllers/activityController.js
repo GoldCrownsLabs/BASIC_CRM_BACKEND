@@ -9,25 +9,20 @@ const convertTo24Hour = (time12h) => {
 
   const timeStr = time12h.trim().toUpperCase();
 
-  // Handle formats like "2:30 PM", "02:30 PM", "2:30PM"
   let time = timeStr;
   let modifier = "AM";
 
-  // Check if contains AM/PM
   if (timeStr.includes("AM") || timeStr.includes("PM")) {
     const parts = timeStr.split(/(AM|PM)/);
     time = parts[0].trim();
     modifier = parts[1];
   }
 
-  // Handle different time formats
   let [hours, minutes = "00"] = time.split(":");
 
-  // Clean up hours
   hours = hours.replace(/\D/g, "");
   hours = parseInt(hours, 10);
 
-  // Convert to 24-hour format
   if (modifier === "PM" && hours < 12) {
     hours += 12;
   } else if (modifier === "AM" && hours === 12) {
