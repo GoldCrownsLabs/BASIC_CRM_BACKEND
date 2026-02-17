@@ -6,7 +6,11 @@ const { Expo } = require("expo-server-sdk");
 const expo = new Expo();
 
 class NotificationService {
-  // Create notification in database
+  // ======================== CORE METHODS ========================
+
+  /**
+   * Create a single notification
+   */
   static async createNotification(notificationData) {
     try {
       const notification = new Notification(notificationData);
@@ -20,7 +24,7 @@ class NotificationService {
         await this.sendPushNotification(notification);
       }
 
-      // Emit real-time notification via Socket.IO if available
+      // Emit real-time notification via Socket.IO
       this.emitRealTimeNotification(notification);
 
       return notification;
@@ -30,7 +34,49 @@ class NotificationService {
     }
   }
 
-  // Send push notification
+  /**
+   * Create multiple notifications in bulk
+   */
+  static async createBulkNotifications(notificationsData) {
+    try {
+      if (!notificationsData.length) return [];
+
+      const notifications = await Notification.insertMany(notificationsData);
+
+      // Group by userId to update badge counts efficiently
+      const userIds = [...new Set(notificationsData.map((n) => n.userId))];
+
+      for (const userId of userIds) {
+        await this.updateBadgeCount(userId);
+
+        // Send real-time notifications
+        const userNotifications = notifications.filter(
+          (n) => n.userId.toString() === userId.toString(),
+        );
+        for (const notification of userNotifications) {
+          await this.emitRealTimeNotification(notification);
+        }
+      }
+
+      // Send push notifications
+      for (const notification of notifications) {
+        if (notification.userId) {
+          await this.sendPushNotification(notification);
+        }
+      }
+
+      return notifications;
+    } catch (error) {
+      console.error("Error creating bulk notifications:", error);
+      throw error;
+    }
+  }
+
+  // ======================== PUSH NOTIFICATION METHODS ========================
+
+  /**
+   * Send push notification via Expo
+   */
   static async sendPushNotification(notification) {
     try {
       const user = await User.findById(notification.userId);
@@ -74,12 +120,11 @@ class NotificationService {
         badge: await this.getUserBadgeCount(user._id),
         ...(process.env.NODE_ENV === "production" && {
           priority: "high",
-          ttl: 60 * 60 * 24,
+          ttl: 60 * 60 * 24, // 24 hours
         }),
       };
 
       // Remove null/undefined values
-      
       Object.keys(message).forEach(
         (key) => message[key] == null && delete message[key],
       );
@@ -109,19 +154,31 @@ class NotificationService {
     }
   }
 
-  // Helper: Get click action based on type
+  /**
+   * Get click action based on notification type (for deep linking)
+   */
   static getClickAction(type, data) {
     const actions = {
-      task: `app://task/${data.taskId}`,
-      lead: `app://lead/${data.leadId}`,
-      project: `app://project/${data.projectId}`,
-      order: `app://order/${data.orderId}`,
-      payment: `app://payment/${data.paymentId}`,
+      task: data.taskId ? `app://task/${data.taskId}` : null,
+      lead: data.leadId ? `app://lead/${data.leadId}` : null,
+      contact: data.contactId ? `app://contact/${data.contactId}` : null,
+      profile: data.profileId ? `app://profile/${data.profileId}` : null,
+      project: data.projectId ? `app://project/${data.projectId}` : null,
+      order: data.orderId ? `app://order/${data.orderId}` : null,
+      payment: data.paymentId ? `app://payment/${data.paymentId}` : null,
+      attendance: data.attendanceId
+        ? `app://attendance/${data.attendanceId}`
+        : null,
+      leave: data.leaveId ? `app://leave/${data.leaveId}` : null,
     };
     return actions[type] || "app://notifications";
   }
 
-  // Helper: Get user badge count
+  // ======================== BADGE MANAGEMENT ========================
+
+  /**
+   * Get user's unread notification count
+   */
   static async getUserBadgeCount(userId) {
     const count = await Notification.countDocuments({
       userId,
@@ -130,7 +187,9 @@ class NotificationService {
     return count;
   }
 
-  // Helper: Update badge count
+  /**
+   * Update user's badge count in database
+   */
   static async updateBadgeCount(userId) {
     const unreadCount = await this.getUserBadgeCount(userId);
     await User.findByIdAndUpdate(userId, {
@@ -139,10 +198,13 @@ class NotificationService {
     return unreadCount;
   }
 
-  // Helper: Emit real-time notification
+  // ======================== REAL-TIME NOTIFICATIONS ========================
+
+  /**
+   * Emit real-time notification via Socket.IO
+   */
   static async emitRealTimeNotification(notification) {
     try {
-      // If Socket.IO is available
       if (global.io) {
         global.io.to(`user-${notification.userId}`).emit("new-notification", {
           ...notification.toObject(),
@@ -154,93 +216,63 @@ class NotificationService {
     }
   }
 
-  // Bulk create notifications
-  static async createBulkNotifications(notificationsData) {
-    try {
-      if (!notificationsData.length) return [];
+  // ======================== TASK NOTIFICATIONS ========================
 
-      const notifications = await Notification.insertMany(notificationsData);
-
-      // Group by userId to update badge counts efficiently
-      const userIds = [...new Set(notificationsData.map((n) => n.userId))];
-
-      for (const userId of userIds) {
-        await this.updateBadgeCount(userId);
-
-        // Send real-time notifications
-        const userNotifications = notifications.filter(
-          (n) => n.userId.toString() === userId.toString(),
-        );
-        for (const notification of userNotifications) {
-          await this.emitRealTimeNotification(notification);
-        }
-      }
-
-      // Send push notifications
-      for (const notification of notifications) {
-        if (notification.userId) {
-          await this.sendPushNotification(notification);
-        }
-      }
-
-      return notifications;
-    } catch (error) {
-      console.error("Error creating bulk notifications:", error);
-      throw error;
-    }
-  }
-
-  // Task created notification (UPDATED for your User model)
+  /**
+   * Notify when a task is created
+   */
   static async notifyTaskCreated(task, createdBy) {
-    const notifications = [];
-    const creator = await User.findById(createdBy);
+    try {
+      const notifications = [];
+      const creator = await User.findById(createdBy);
 
-    // Notify creator
-    if (creator && creator.shouldReceiveNotification("task")) {
-      notifications.push({
-        userId: createdBy,
-        title: "Task Created",
-        message: `Task "${task.title}" has been created successfully`,
-        type: "task",
-        data: {
-          taskId: task._id,
-          action: "created",
-          projectId: task.projectId,
-          priority: task.priority,
-        },
-      });
-    }
+      if (!creator) return [];
 
-    // Notify assigned users
-    if (task.assignedTo && task.assignedTo.length > 0) {
-      const assignedUsers = await User.find({
-        _id: { $in: task.assignedTo },
-        isActive: true,
-      });
+      // 1. Notify creator
+      if (creator.shouldReceiveNotification("task")) {
+        notifications.push({
+          userId: createdBy,
+          title: "Task Created",
+          message: `Task "${task.title}" has been created successfully`,
+          type: "task",
+          data: {
+            taskId: task._id,
+            action: "created",
+            projectId: task.projectId,
+            priority: task.priority,
+          },
+        });
+      }
 
-      for (const user of assignedUsers) {
-        if (
-          user._id.toString() !== createdBy.toString() &&
-          user.shouldReceiveNotification("task")
-        ) {
-          notifications.push({
-            userId: user._id,
-            title: "New Task Assigned",
-            message: `You have been assigned: "${task.title}"`,
-            type: "task",
-            data: {
-              taskId: task._id,
-              action: "assigned",
-              assignedBy: createdBy,
-              dueDate: task.dueDate,
-            },
-          });
+      // 2. Notify assigned users
+      if (task.assignedTo && task.assignedTo.length > 0) {
+        const assignedUsers = await User.find({
+          _id: { $in: task.assignedTo },
+          isActive: true,
+        });
+
+        for (const user of assignedUsers) {
+          if (
+            user._id.toString() !== createdBy.toString() &&
+            user.shouldReceiveNotification("task")
+          ) {
+            notifications.push({
+              userId: user._id,
+              title: "New Task Assigned",
+              message: `You have been assigned: "${task.title}"`,
+              type: "task",
+              data: {
+                taskId: task._id,
+                action: "assigned",
+                assignedBy: createdBy,
+                dueDate: task.dueDate,
+              },
+            });
+          }
         }
       }
-    }
 
-    // Notify reporting managers
-    if (creator) {
+      // 3. Notify reporting managers
       const reportingChain = await creator.getReportingChain();
       for (const manager of reportingChain) {
         if (manager.shouldReceiveNotification("task")) {
@@ -258,178 +290,686 @@ class NotificationService {
           });
         }
       }
-    }
 
-    return await this.createBulkNotifications(notifications);
+      return await this.createBulkNotifications(notifications);
+    } catch (error) {
+      console.error("Error in notifyTaskCreated:", error);
+      throw error;
+    }
   }
 
-  // Lead created notification (UPDATED)
-  static async notifyLeadCreated(lead, createdBy) {
-    const notifications = [];
-    const creator = await User.findById(createdBy);
+  /**
+   * Notify when a task is updated
+   */
+  static async notifyTaskUpdated(task, updatedBy, changes) {
+    try {
+      const notifications = [];
+      const updater = await User.findById(updatedBy);
 
-    // Notify creator
-    if (creator && creator.shouldReceiveNotification("lead")) {
+      if (!updater) return [];
+
+      // Notify assigned users
+      if (task.assignedTo && task.assignedTo.length > 0) {
+        const assignedUsers = await User.find({
+          _id: { $in: task.assignedTo },
+          isActive: true,
+        });
+
+        for (const user of assignedUsers) {
+          if (user.shouldReceiveNotification("task")) {
+            notifications.push({
+              userId: user._id,
+              title: "Task Updated",
+              message: `Task "${task.title}" has been updated by ${updater.name}`,
+              type: "task",
+              data: {
+                taskId: task._id,
+                action: "updated",
+                updatedBy: updatedBy,
+                updaterName: updater.name,
+                changes: changes,
+              },
+            });
+          }
+        }
+      }
+
+      return await this.createBulkNotifications(notifications);
+    } catch (error) {
+      console.error("Error in notifyTaskUpdated:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Notify when a task is completed
+   */
+  static async notifyTaskCompleted(task, completedBy) {
+    try {
+      const notifications = [];
+      const completer = await User.findById(completedBy);
+
+      if (!completer) return [];
+
+      // Notify task creator
+      if (
+        task.createdBy &&
+        task.createdBy.toString() !== completedBy.toString()
+      ) {
+        const creator = await User.findById(task.createdBy);
+        if (creator && creator.shouldReceiveNotification("task")) {
+          notifications.push({
+            userId: task.createdBy,
+            title: "Task Completed",
+            message: `Task "${task.title}" has been completed by ${completer.name}`,
+            type: "task",
+            data: {
+              taskId: task._id,
+              action: "completed",
+              completedBy: completedBy,
+              completerName: completer.name,
+            },
+          });
+        }
+      }
+
+      // Notify project manager
+      if (task.projectId) {
+        // Find project manager logic here
+      }
+
+      return await this.createBulkNotifications(notifications);
+    } catch (error) {
+      console.error("Error in notifyTaskCompleted:", error);
+      throw error;
+    }
+  }
+
+  // ======================== LEAD NOTIFICATIONS ========================
+
+  /**
+   * Notify when a lead is created
+   */
+  static async notifyLeadCreated(lead, createdBy) {
+    try {
+      const notifications = [];
+      const creator = await User.findById(createdBy);
+
+      if (!creator) return [];
+
+      // 1. Notify creator
+      if (creator.shouldReceiveNotification("lead")) {
+        notifications.push({
+          userId: createdBy,
+          title: "Lead Created",
+          message: `New lead "${lead.name}" has been added`,
+          type: "lead",
+          data: {
+            leadId: lead._id,
+            action: "created",
+            source: lead.source,
+            status: lead.status,
+          },
+        });
+      }
+
+      // 2. Notify assigned sales person
+      if (lead.assignedTo) {
+        const assignedUser = await User.findById(lead.assignedTo);
+        if (
+          assignedUser &&
+          assignedUser._id.toString() !== createdBy.toString() &&
+          assignedUser.shouldReceiveNotification("lead")
+        ) {
+          notifications.push({
+            userId: lead.assignedTo,
+            title: "New Lead Assigned",
+            message: `Lead "${lead.name}" assigned to you`,
+            type: "lead",
+            data: {
+              leadId: lead._id,
+              action: "assigned",
+              assignedBy: createdBy,
+              leadValue: lead.value,
+            },
+          });
+        }
+      }
+
+      // 3. Notify sales managers
+      const salesManagers = await User.find({
+        role: { $in: ["manager", "supervisor"] },
+        department: "sales",
+        isActive: true,
+      });
+
+      for (const manager of salesManagers) {
+        if (manager.shouldReceiveNotification("lead")) {
+          notifications.push({
+            userId: manager._id,
+            title: "New Lead Added",
+            message: `New lead "${lead.name}" added to system`,
+            type: "lead",
+            data: {
+              leadId: lead._id,
+              action: "manager_notify",
+              createdBy: createdBy,
+              creatorName: creator?.name,
+            },
+          });
+        }
+      }
+
+      return await this.createBulkNotifications(notifications);
+    } catch (error) {
+      console.error("Error in notifyLeadCreated:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Notify when lead status changes
+   */
+  static async notifyLeadStatusChanged(lead, oldStatus, newStatus, changedBy) {
+    try {
+      const notifications = [];
+      const changer = await User.findById(changedBy);
+
+      if (!changer) return [];
+
+      // Notify assigned sales person
+      if (lead.assignedTo) {
+        const assignedUser = await User.findById(lead.assignedTo);
+        if (assignedUser && assignedUser.shouldReceiveNotification("lead")) {
+          notifications.push({
+            userId: lead.assignedTo,
+            title: "Lead Status Updated",
+            message: `Lead "${lead.name}" status changed from ${oldStatus} to ${newStatus}`,
+            type: "lead",
+            data: {
+              leadId: lead._id,
+              action: "status_changed",
+              oldStatus: oldStatus,
+              newStatus: newStatus,
+              changedBy: changedBy,
+              changerName: changer.name,
+            },
+          });
+        }
+      }
+
+      return await this.createBulkNotifications(notifications);
+    } catch (error) {
+      console.error("Error in notifyLeadStatusChanged:", error);
+      throw error;
+    }
+  }
+
+  // ======================== CONTACT NOTIFICATIONS ========================
+
+  /**
+   * Notify when a contact is created
+   */
+  static async notifyContactCreated(contact, createdBy) {
+    try {
+      const notifications = [];
+      const creator = await User.findById(createdBy);
+
+      if (!creator) return [];
+
+      // 1. Creator ko notification
+      if (creator.shouldReceiveNotification("contact")) {
+        notifications.push({
+          userId: createdBy,
+          title: "Contact Added",
+          message: `New contact "${contact.name}" has been added successfully`,
+          type: "contact",
+          data: {
+            contactId: contact._id,
+            action: "created",
+            email: contact.email,
+            phone: contact.phone,
+            company: contact.company,
+          },
+        });
+      }
+
+      // 2. Team members ko notification (same department)
+      if (creator.department) {
+        const teamMembers = await User.find({
+          department: creator.department,
+          isActive: true,
+          _id: { $ne: createdBy },
+        });
+
+        for (const member of teamMembers) {
+          if (member.shouldReceiveNotification("contact")) {
+            notifications.push({
+              userId: member._id,
+              title: "New Team Contact",
+              message: `${creator.name} added contact: "${contact.name}"`,
+              type: "contact",
+              data: {
+                contactId: contact._id,
+                action: "team_contact",
+                addedBy: createdBy,
+                addedByName: creator.name,
+                company: contact.company,
+              },
+            });
+          }
+        }
+      }
+
+      // 3. Reporting managers ko notification
+      const reportingChain = await creator.getReportingChain();
+      for (const manager of reportingChain) {
+        if (manager.shouldReceiveNotification("contact")) {
+          notifications.push({
+            userId: manager._id,
+            title: "Team Contact Added",
+            message: `${creator.name} added new contact: "${contact.name}" from ${contact.company || "Unknown"}`,
+            type: "contact",
+            data: {
+              contactId: contact._id,
+              action: "manager_notify",
+              addedBy: createdBy,
+              creatorName: creator.name,
+            },
+          });
+        }
+      }
+
+      // 4. Sales team ko notify agar lead hai (optional)
+      if (contact.isLead || contact.convertToLead) {
+        const salesTeam = await User.find({
+          department: "sales",
+          isActive: true,
+          _id: { $ne: createdBy },
+        });
+
+        for (const salesPerson of salesTeam) {
+          if (salesPerson.shouldReceiveNotification("contact")) {
+            notifications.push({
+              userId: salesPerson._id,
+              title: "New Lead from Contact",
+              message: `Contact "${contact.name}" can be converted to lead`,
+              type: "contact",
+              data: {
+                contactId: contact._id,
+                action: "potential_lead",
+                addedBy: createdBy,
+                email: contact.email,
+                phone: contact.phone,
+              },
+            });
+          }
+        }
+      }
+
+      return await this.createBulkNotifications(notifications);
+    } catch (error) {
+      console.error("Error in notifyContactCreated:", error);
+      throw error;
+    }
+  }
+
+  // ======================== PROFILE NOTIFICATIONS ========================
+
+  /**
+   * Notify when a profile is created (user registration)
+   */
+  static async notifyProfileCreated(newUser, createdBy = null) {
+    try {
+      const notifications = [];
+
+      // Agar admin ya manager ne profile banayi hai
+      if (createdBy && createdBy !== newUser._id.toString()) {
+        const creator = await User.findById(createdBy);
+
+        if (!creator) return [];
+
+        // 1. Naye user ko welcome notification
+        notifications.push({
+          userId: newUser._id,
+          title: "🎉 Welcome to the Team!",
+          message: `Hello ${newUser.name}, your profile has been created. Get started by completing your profile!`,
+          type: "profile",
+          data: {
+            profileId: newUser._id,
+            action: "welcome",
+            role: newUser.role,
+            department: newUser.department,
+          },
+        });
+
+        // 2. Creator ko confirmation
+        if (creator.shouldReceiveNotification("profile")) {
+          notifications.push({
+            userId: createdBy,
+            title: "Profile Created Successfully",
+            message: `New profile created for ${newUser.name} (${newUser.role})`,
+            type: "profile",
+            data: {
+              profileId: newUser._id,
+              action: "created",
+              userEmail: newUser.email,
+              userRole: newUser.role,
+              userDepartment: newUser.department,
+            },
+          });
+        }
+
+        // 3. HR/Admin team ko notification (sabhi admins ko)
+        const admins = await User.find({
+          role: { $in: ["admin", "hr_manager", "super_admin"] },
+          isActive: true,
+          _id: { $ne: createdBy },
+        });
+
+        for (const admin of admins) {
+          if (admin.shouldReceiveNotification("profile")) {
+            notifications.push({
+              userId: admin._id,
+              title: "New User Registration",
+              message: `${newUser.name} joined as ${newUser.role} in ${newUser.department || "General"}`,
+              type: "profile",
+              data: {
+                profileId: newUser._id,
+                action: "new_user",
+                createdBy: createdBy,
+                creatorName: creator.name,
+                userEmail: newUser.email,
+              },
+            });
+          }
+        }
+
+        // 4. Department head ko notification
+        if (newUser.department) {
+          const deptHead = await User.findOne({
+            department: newUser.department,
+            role: { $in: ["manager", "head"] },
+            isActive: true,
+          });
+
+          if (deptHead && deptHead._id.toString() !== createdBy.toString()) {
+            if (deptHead.shouldReceiveNotification("profile")) {
+              notifications.push({
+                userId: deptHead._id,
+                title: "New Team Member",
+                message: `${newUser.name} has joined your ${newUser.department} department`,
+                type: "profile",
+                data: {
+                  profileId: newUser._id,
+                  action: "department_join",
+                  userRole: newUser.role,
+                  createdBy: createdBy,
+                },
+              });
+            }
+          }
+        }
+      } else {
+        // Self-registration (user ne khud register kiya)
+
+        // 1. User ko welcome notification
+        notifications.push({
+          userId: newUser._id,
+          title: "🎉 Welcome Aboard!",
+          message: `Hi ${newUser.name}, thank you for joining! Complete your profile to get started.`,
+          type: "profile",
+          data: {
+            profileId: newUser._id,
+            action: "self_registration",
+          },
+        });
+
+        // 2. Admins ko notify about new self-registration
+        const admins = await User.find({
+          role: { $in: ["admin", "hr_manager", "super_admin"] },
+          isActive: true,
+        });
+
+        for (const admin of admins) {
+          if (admin.shouldReceiveNotification("profile")) {
+            notifications.push({
+              userId: admin._id,
+              title: "New User Self-Registration",
+              message: `${newUser.name} (${newUser.email}) just joined the platform`,
+              type: "profile",
+              data: {
+                profileId: newUser._id,
+                action: "new_registration",
+                userEmail: newUser.email,
+                userRole: newUser.role || "Not specified",
+              },
+            });
+          }
+        }
+      }
+
+      if (notifications.length === 0) return [];
+
+      return await this.createBulkNotifications(notifications);
+    } catch (error) {
+      console.error("Error in notifyProfileCreated:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Notify when profile is updated
+   */
+  static async notifyProfileUpdated(userId, updatedBy, changes) {
+    try {
+      const user = await User.findById(userId);
+      const updater = await User.findById(updatedBy);
+
+      if (!user || !updater) return null;
+
+      // Khud ke profile update pe notification mat bhejo
+      if (userId.toString() === updatedBy.toString()) {
+        return null;
+      }
+
+      const notifications = [];
+
+      // User ko notify karo ki unka profile update hua
       notifications.push({
-        userId: createdBy,
-        title: "Lead Created",
-        message: `New lead "${lead.name}" has been added`,
-        type: "lead",
+        userId: userId,
+        title: "Profile Updated",
+        message: `Your profile was updated by ${updater.name}`,
+        type: "profile",
         data: {
-          leadId: lead._id,
-          action: "created",
-          source: lead.source,
-          status: lead.status,
+          profileId: userId,
+          action: "updated_by_admin",
+          updatedBy: updatedBy,
+          updaterName: updater.name,
+          changes: changes,
         },
       });
-    }
 
-    // Notify assigned sales person
-    if (lead.assignedTo) {
-      const assignedUser = await User.findById(lead.assignedTo);
-      if (
-        assignedUser &&
-        assignedUser._id.toString() !== createdBy.toString() &&
-        assignedUser.shouldReceiveNotification("lead")
-      ) {
+      // Admin ko confirmation
+      if (updater.shouldReceiveNotification("profile")) {
         notifications.push({
-          userId: lead.assignedTo,
-          title: "New Lead Assigned",
-          message: `Lead "${lead.name}" assigned to you`,
-          type: "lead",
+          userId: updatedBy,
+          title: "Profile Update Success",
+          message: `You have updated ${user.name}'s profile`,
+          type: "profile",
           data: {
-            leadId: lead._id,
-            action: "assigned",
-            assignedBy: createdBy,
-            leadValue: lead.value,
+            profileId: userId,
+            action: "update_success",
+            userName: user.name,
+            changes: changes,
           },
         });
       }
+
+      return await this.createBulkNotifications(notifications);
+    } catch (error) {
+      console.error("Error in notifyProfileUpdated:", error);
+      throw error;
     }
-
-    // Notify sales managers
-    const salesManagers = await User.find({
-      role: { $in: ["manager", "supervisor"] },
-      department: "sales",
-      isActive: true,
-    });
-
-    for (const manager of salesManagers) {
-      if (manager.shouldReceiveNotification("lead")) {
-        notifications.push({
-          userId: manager._id,
-          title: "New Lead Added",
-          message: `New lead "${lead.name}" added to system`,
-          type: "lead",
-          data: {
-            leadId: lead._id,
-            action: "manager_notify",
-            createdBy: createdBy,
-            creatorName: creator?.name,
-          },
-        });
-      }
-    }
-
-    return await this.createBulkNotifications(notifications);
   }
 
-  // Order notification
+  // ======================== ORDER & PAYMENT NOTIFICATIONS ========================
+
+  /**
+   * Notify when order is created
+   */
   static async notifyOrderCreated(order, userId) {
-    const user = await User.findById(userId);
-    if (!user || !user.shouldReceiveNotification("order")) return null;
+    try {
+      const user = await User.findById(userId);
+      if (!user || !user.shouldReceiveNotification("order")) return null;
 
-    return await this.createNotification({
-      userId,
-      title: "Order Placed",
-      message: `Your order #${order.orderNumber} has been placed successfully`,
-      type: "order",
-      data: {
-        orderId: order._id,
-        orderNumber: order.orderNumber,
-        totalAmount: order.totalAmount,
-        status: order.status,
-      },
-    });
+      return await this.createNotification({
+        userId,
+        title: "Order Placed",
+        message: `Your order #${order.orderNumber} has been placed successfully`,
+        type: "order",
+        data: {
+          orderId: order._id,
+          orderNumber: order.orderNumber,
+          totalAmount: order.totalAmount,
+          status: order.status,
+        },
+      });
+    } catch (error) {
+      console.error("Error in notifyOrderCreated:", error);
+      throw error;
+    }
   }
 
-  // Payment notification
+  /**
+   * Notify when payment is received
+   */
   static async notifyPaymentReceived(payment, userId) {
-    const user = await User.findById(userId);
-    if (!user || !user.shouldReceiveNotification("payment")) return null;
+    try {
+      const user = await User.findById(userId);
+      if (!user || !user.shouldReceiveNotification("payment")) return null;
 
-    return await this.createNotification({
-      userId,
-      title: "Payment Received",
-      message: `Payment of ₹${payment.amount} received for order #${payment.orderNumber}`,
-      type: "payment",
-      data: {
-        paymentId: payment._id,
-        orderId: payment.orderId,
-        amount: payment.amount,
-        method: payment.method,
-      },
-    });
+      return await this.createNotification({
+        userId,
+        title: "Payment Received",
+        message: `Payment of ₹${payment.amount} received for order #${payment.orderNumber}`,
+        type: "payment",
+        data: {
+          paymentId: payment._id,
+          orderId: payment.orderId,
+          amount: payment.amount,
+          method: payment.method,
+        },
+      });
+    } catch (error) {
+      console.error("Error in notifyPaymentReceived:", error);
+      throw error;
+    }
   }
 
-  // System notification
+  // ======================== SYSTEM NOTIFICATIONS ========================
+
+  /**
+   * Send system notification
+   */
   static async sendSystemNotification(userId, title, message, data = {}) {
-    return await this.createNotification({
-      userId,
-      title,
-      message,
-      type: "system",
-      data,
-    });
+    try {
+      return await this.createNotification({
+        userId,
+        title,
+        message,
+        type: "system",
+        data,
+      });
+    } catch (error) {
+      console.error("Error in sendSystemNotification:", error);
+      throw error;
+    }
   }
 
-  // Get user notifications
+  /**
+   * Broadcast system notification to all users
+   */
+  static async broadcastSystemNotification(
+    title,
+    message,
+    data = {},
+    userFilter = {},
+  ) {
+    try {
+      const users = await User.find({ isActive: true, ...userFilter }).select(
+        "_id",
+      );
+
+      const notifications = users.map((user) => ({
+        userId: user._id,
+        title,
+        message,
+        type: "system",
+        data,
+      }));
+
+      return await this.createBulkNotifications(notifications);
+    } catch (error) {
+      console.error("Error in broadcastSystemNotification:", error);
+      throw error;
+    }
+  }
+
+  // ======================== NOTIFICATION MANAGEMENT ========================
+
+  /**
+   * Get user notifications with pagination
+   */
   static async getUserNotifications(userId, options = {}) {
-    const { limit = 20, skip = 0, unreadOnly = false, type } = options;
+    try {
+      const { limit = 20, skip = 0, unreadOnly = false, type } = options;
 
-    const query = { userId };
-    if (unreadOnly) {
-      query.read = false;
+      const query = { userId };
+      if (unreadOnly) query.read = false;
+      if (type) query.type = type;
+
+      const notifications = await Notification.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean();
+
+      const total = await Notification.countDocuments(query);
+      const unreadCount = await this.getUserBadgeCount(userId);
+
+      // Update last check time
+      await User.findByIdAndUpdate(userId, {
+        lastNotificationCheck: new Date(),
+      });
+
+      // Add timeAgo to each notification
+      const enrichedNotifications = notifications.map((notification) => ({
+        ...notification,
+        timeAgo: this.calculateTimeAgo(notification.createdAt),
+      }));
+
+      return {
+        notifications: enrichedNotifications,
+        pagination: {
+          total,
+          limit,
+          skip,
+          hasMore: total > skip + limit,
+          page: Math.floor(skip / limit) + 1,
+          totalPages: Math.ceil(total / limit),
+        },
+        unreadCount,
+      };
+    } catch (error) {
+      console.error("Error in getUserNotifications:", error);
+      throw error;
     }
-    if (type) {
-      query.type = type;
-    }
-
-    const notifications = await Notification.find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
-
-    const total = await Notification.countDocuments(query);
-    const unreadCount = await this.getUserBadgeCount(userId);
-
-    // Update last check time
-    await User.findByIdAndUpdate(userId, {
-      lastNotificationCheck: new Date(),
-    });
-
-    // Add timeAgo to each notification
-    const enrichedNotifications = notifications.map((notification) => ({
-      ...notification,
-      timeAgo: this.calculateTimeAgo(notification.createdAt),
-    }));
-
-    return {
-      notifications: enrichedNotifications,
-      pagination: {
-        total,
-        limit,
-        skip,
-        hasMore: total > skip + limit,
-        page: Math.floor(skip / limit) + 1,
-        totalPages: Math.ceil(total / limit),
-      },
-      unreadCount,
-    };
   }
 
-  // Helper: Calculate time ago
+  /**
+   * Calculate time ago string
+   */
   static calculateTimeAgo(date) {
     const now = new Date();
     const diffMs = now - new Date(date);
@@ -444,70 +984,102 @@ class NotificationService {
     return "Just now";
   }
 
-  // Mark as read
+  /**
+   * Mark a notification as read
+   */
   static async markAsRead(notificationId, userId) {
-    const notification = await Notification.findOneAndUpdate(
-      { _id: notificationId, userId },
-      { read: true },
-      { new: true },
-    );
+    try {
+      const notification = await Notification.findOneAndUpdate(
+        { _id: notificationId, userId },
+        { read: true },
+        { new: true },
+      );
 
-    if (notification) {
-      await this.updateBadgeCount(userId);
-      await this.emitRealTimeNotification(notification);
-    }
-
-    return notification;
-  }
-
-  // Mark all as read
-  static async markAllAsRead(userId) {
-    await Notification.updateMany({ userId, read: false }, { read: true });
-
-    await this.updateBadgeCount(userId);
-
-    // Emit update via socket
-    if (global.io) {
-      global.io.to(`user-${userId}`).emit("notifications-read", { all: true });
-    }
-
-    return true;
-  }
-
-  // Delete notification
-  static async deleteNotification(notificationId, userId) {
-    const notification = await Notification.findOneAndDelete({
-      _id: notificationId,
-      userId,
-    });
-
-    if (notification) {
-      await this.updateBadgeCount(userId);
-
-      // Emit deletion via socket
-      if (global.io) {
-        global.io.to(`user-${userId}`).emit("notification-deleted", {
-          notificationId: notificationId,
-        });
+      if (notification) {
+        await this.updateBadgeCount(userId);
+        await this.emitRealTimeNotification(notification);
       }
+
+      return notification;
+    } catch (error) {
+      console.error("Error in markAsRead:", error);
+      throw error;
     }
-
-    return notification;
   }
 
-  // Clear expired notifications
+  /**
+   * Mark all notifications as read
+   */
+  static async markAllAsRead(userId) {
+    try {
+      await Notification.updateMany({ userId, read: false }, { read: true });
+
+      await this.updateBadgeCount(userId);
+
+      // Emit update via socket
+      if (global.io) {
+        global.io
+          .to(`user-${userId}`)
+          .emit("notifications-read", { all: true });
+      }
+
+      return true;
+    } catch (error) {
+      console.error("Error in markAllAsRead:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete a notification
+   */
+  static async deleteNotification(notificationId, userId) {
+    try {
+      const notification = await Notification.findOneAndDelete({
+        _id: notificationId,
+        userId,
+      });
+
+      if (notification) {
+        await this.updateBadgeCount(userId);
+
+        // Emit deletion via socket
+        if (global.io) {
+          global.io.to(`user-${userId}`).emit("notification-deleted", {
+            notificationId: notificationId,
+          });
+        }
+      }
+
+      return notification;
+    } catch (error) {
+      console.error("Error in deleteNotification:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Clear expired notifications
+   */
   static async clearExpired() {
-    const result = await Notification.deleteMany({
-      expiresAt: { $lt: new Date() },
-    });
-
-    return result.deletedCount;
+    try {
+      const result = await Notification.deleteMany({
+        expiresAt: { $lt: new Date() },
+      });
+      return result.deletedCount;
+    } catch (error) {
+      console.error("Error in clearExpired:", error);
+      throw error;
+    }
   }
 
-  // Get notification statistics
+  // ======================== STATISTICS ========================
+
+  /**
+   * Get notification statistics for a user
+   */
   static async getNotificationStats(userId) {
     try {
-      // Simple count approach (no aggregation needed)
       const [total, unread] = await Promise.all([
         Notification.countDocuments({ userId }),
         Notification.countDocuments({ userId, read: false }),
@@ -515,7 +1087,7 @@ class NotificationService {
 
       // Get counts by type
       const typeStats = await Notification.aggregate([
-        { $match: { userId: mongoose.Types.ObjectId(userId) } },
+        { $match: { userId: new mongoose.Types.ObjectId(userId) } },
         {
           $group: {
             _id: "$type",
@@ -536,7 +1108,6 @@ class NotificationService {
         { $sort: { type: 1 } },
       ]);
 
-      // Convert array to object
       const byType = {};
       typeStats.forEach((stat) => {
         byType[stat.type] = {
@@ -553,7 +1124,7 @@ class NotificationService {
         byType,
       };
     } catch (error) {
-      console.error("Get notification stats error:", error);
+      console.error("Error in getNotificationStats:", error);
       return { total: 0, unread: 0, read: 0, byType: {} };
     }
   }

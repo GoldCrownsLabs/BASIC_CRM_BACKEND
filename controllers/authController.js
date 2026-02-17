@@ -1,6 +1,7 @@
 const User = require("../models/User");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
+const NotificationService = require("../services/notificationService"); // ✅ Import
 
 // ========================
 // HELPER FUNCTIONS
@@ -9,7 +10,7 @@ const generateToken = (id) => {
   return jwt.sign(
     { id },
     process.env.JWT_SECRET || "dev_secret_key_for_testing",
-    { expiresIn: "30d" }
+    { expiresIn: "30d" },
   );
 };
 
@@ -44,7 +45,7 @@ const sendTokenResponse = (user, statusCode, res, message) => {
 // AUTH CONTROLLERS
 // ========================
 
-// @desc    Register user
+// @desc    Register user (Self Registration)
 // @route   POST /api/auth/register
 // @access  Public
 exports.register = async (req, res) => {
@@ -127,6 +128,17 @@ exports.register = async (req, res) => {
     };
 
     const user = await User.create(userData);
+
+    // 🔥 BACKGROUND NOTIFICATION - Self Registration
+    setImmediate(() => {
+      NotificationService.notifyProfileCreated(user, null) // null = self registration
+        .then(() => {
+          console.log(`📨 Welcome notification sent to: ${user._id}`);
+        })
+        .catch(() => {
+          // Silent fail - user ko kuch nahi dikhana
+        });
+    });
 
     // Send response with token
     sendTokenResponse(user, 201, res, "User registered successfully");
@@ -245,7 +257,7 @@ exports.getProfile = async (req, res) => {
   }
 };
 
-// @desc    Update user profile
+// @desc    Update user profile (Self update)
 // @route   PUT /api/auth/profile
 // @access  Private
 exports.updateProfile = async (req, res) => {
@@ -264,7 +276,7 @@ exports.updateProfile = async (req, res) => {
     const updatedUser = await User.findByIdAndUpdate(
       req.user.id,
       { $set: updateData },
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     ).select("-password");
 
     if (!updatedUser) {
@@ -488,7 +500,7 @@ exports.updateAddress = async (req, res) => {
     }
 
     const addressIndex = user.addresses.findIndex(
-      (addr) => addr._id.toString() === addressId
+      (addr) => addr._id.toString() === addressId,
     );
 
     if (addressIndex === -1) {
@@ -542,7 +554,7 @@ exports.deleteAddress = async (req, res) => {
     }
 
     const address = user.addresses.find(
-      (addr) => addr._id.toString() === addressId
+      (addr) => addr._id.toString() === addressId,
     );
 
     if (!address) {
@@ -560,7 +572,7 @@ exports.deleteAddress = async (req, res) => {
     }
 
     user.addresses = user.addresses.filter(
-      (addr) => addr._id.toString() !== addressId
+      (addr) => addr._id.toString() !== addressId,
     );
 
     if (address.isDefault && user.addresses.length > 0) {
@@ -604,7 +616,7 @@ exports.setDefaultAddress = async (req, res) => {
     });
 
     const addressIndex = user.addresses.findIndex(
-      (addr) => addr._id.toString() === addressId
+      (addr) => addr._id.toString() === addressId,
     );
 
     if (addressIndex === -1) {
@@ -635,6 +647,100 @@ exports.setDefaultAddress = async (req, res) => {
 // ADMIN CONTROLLERS
 // ========================
 
+// @desc    Create user (Admin only) - NEW METHOD
+// @route   POST /api/auth/users
+// @access  Private/Admin
+exports.createUser = async (req, res) => {
+  try {
+    const { name, email, password, role, phone, department, addresses } =
+      req.body;
+
+    // Validation
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        error: "Please provide name, email and password",
+      });
+    }
+
+    // Check if user exists
+    const userExists = await User.findOne({ email });
+    if (userExists) {
+      return res.status(400).json({
+        success: false,
+        error: "User already exists",
+      });
+    }
+
+    // Hash password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    // Create user
+    const userData = {
+      name,
+      email,
+      password: hashedPassword,
+      phone: phone || "",
+      role: role || "user",
+      department: department || "",
+      profileImage: "",
+      theme: "light",
+      addresses: addresses || [],
+      lastSync: new Date(),
+      lastLogin: new Date(),
+      emailVerified: true, // Admin created accounts are pre-verified
+      isActive: true,
+      newsletterSubscription: true,
+    };
+
+    const user = await User.create(userData);
+
+    // 🔥 BACKGROUND NOTIFICATION - Admin created user
+    setImmediate(() => {
+      NotificationService.notifyProfileCreated(user, req.user.id) // req.user.id = admin
+        .then(() => {
+          console.log(`📨 Profile notification sent for user: ${user._id}`);
+        })
+        .catch(() => {
+          // Silent fail
+        });
+    });
+
+    // Return response without password
+    const userResponse = user.toObject();
+    delete userResponse.password;
+
+    res.status(201).json({
+      success: true,
+      message: "User created successfully",
+      user: userResponse,
+    });
+  } catch (error) {
+    console.error("Create User Error:", error);
+
+    if (error.name === "ValidationError") {
+      const errors = Object.values(error.errors).map((err) => err.message);
+      return res.status(400).json({
+        success: false,
+        error: errors.join(", "),
+      });
+    }
+
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        error: "Email already exists",
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: "Failed to create user",
+    });
+  }
+};
+
 // @desc    Get all users (Admin only)
 // @route   GET /api/auth/users
 // @access  Private/Admin
@@ -664,21 +770,47 @@ exports.updateUser = async (req, res) => {
     const { userId } = req.params;
     const updateData = req.body;
 
+    // Get old user data for tracking changes
+    const oldUser = await User.findById(userId);
+
+    if (!oldUser) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found",
+      });
+    }
+
     delete updateData.password;
     delete updateData.email;
 
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       { $set: updateData },
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     ).select("-password");
 
-    if (!updatedUser) {
-      return res.status(404).json({
-        success: false,
-        error: "User not found",
+    // 🔥 BACKGROUND NOTIFICATION - Profile updated by admin
+    setImmediate(() => {
+      // Track what changed
+      const changes = {};
+      Object.keys(updateData).forEach((key) => {
+        if (JSON.stringify(oldUser[key]) !== JSON.stringify(updateData[key])) {
+          changes[key] = {
+            old: oldUser[key],
+            new: updateData[key],
+          };
+        }
       });
-    }
+
+      // Only send notification if there are actual changes
+      if (Object.keys(changes).length > 0) {
+        NotificationService.notifyProfileUpdated(
+          userId,
+          req.user.id, // admin who updated
+          changes,
+        ).catch(() => {});
+      }
+    });
 
     res.json({
       success: true,
@@ -762,8 +894,30 @@ exports.toggleActiveStatus = async (req, res) => {
       });
     }
 
+    const wasActive = user.isActive;
     user.isActive = !user.isActive;
     await user.save();
+
+    // 🔥 BACKGROUND NOTIFICATION - Account status changed
+    setImmediate(() => {
+      if (!user.isActive) {
+        // Account deactivated
+        NotificationService.sendSystemNotification(
+          userId,
+          "Account Deactivated",
+          "Your account has been deactivated by admin. Please contact support.",
+          { action: "deactivated", by: req.user.id },
+        ).catch(() => {});
+      } else {
+        // Account activated
+        NotificationService.sendSystemNotification(
+          userId,
+          "Account Activated",
+          "Your account has been reactivated. You can now login.",
+          { action: "activated", by: req.user.id },
+        ).catch(() => {});
+      }
+    });
 
     res.json({
       success: true,
@@ -875,7 +1029,7 @@ exports.updateLastSync = async (req, res) => {
           lastSync: new Date(),
         },
       },
-      { new: true }
+      { new: true },
     ).select("-password");
 
     res.json({

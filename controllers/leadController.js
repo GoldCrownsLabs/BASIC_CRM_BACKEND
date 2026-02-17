@@ -1,16 +1,12 @@
 const Lead = require("../models/Lead");
+const User = require("../models/User");
+const NotificationService = require("../services/notificationService");
 
 // @desc    Create a new lead
 // @route   POST /api/leads
 // @access  Private
 exports.createLead = async (req, res) => {
   try {
-    console.log("=== CREATE LEAD DEBUG ===");
-    console.log("1. Request Body:", JSON.stringify(req.body, null, 2));
-    console.log("2. User from Auth:", req.user);
-    console.log("3. User ID:", req.user ? req.user.id : null);
-    console.log("========================");
-
     const {
       firstName,
       lastName,
@@ -29,7 +25,6 @@ exports.createLead = async (req, res) => {
 
     // Validation
     if (!firstName || !email) {
-      console.log("❌ Missing required fields");
       return res.status(400).json({
         success: false,
         error: "First name and email are required",
@@ -38,25 +33,22 @@ exports.createLead = async (req, res) => {
 
     // Check if user exists
     if (!req.user || !req.user.id) {
-      console.log("❌ No user in request");
       return res.status(401).json({
         success: false,
         error: "User not authenticated",
       });
     }
 
-    console.log("🔍 Checking for existing lead with email:", email);
+    // Check for existing lead
     const existingLead = await Lead.findOne({ email });
-
     if (existingLead) {
-      console.log("❌ Lead already exists with email:", email);
       return res.status(400).json({
         success: false,
         error: "Lead with this email already exists",
       });
     }
 
-    console.log("🔍 Creating new lead...");
+    // Create lead
     const lead = new Lead({
       firstName,
       lastName,
@@ -74,9 +66,18 @@ exports.createLead = async (req, res) => {
       createdBy: req.user.id,
     });
 
-    console.log("🔍 Saving lead to database...");
     await lead.save();
-    console.log("✅ Lead saved successfully:", lead._id);
+
+    // 🔥 BACKGROUND NOTIFICATION - User ko kuch nahi dikhega
+    setImmediate(() => {
+      NotificationService.notifyLeadCreated(lead, req.user.id)
+        .then(() => {
+          console.log(`📨 Lead notification sent: ${lead._id}`);
+        })
+        .catch(() => {
+          // Silent fail - kuch mat karo
+        });
+    });
 
     res.status(201).json({
       success: true,
@@ -84,15 +85,10 @@ exports.createLead = async (req, res) => {
       data: lead,
     });
   } catch (error) {
-    console.error("❌❌❌ CREATE LEAD ERROR DETAILS ❌❌❌");
-    console.error("Error Name:", error.name);
-    console.error("Error Message:", error.message);
-    console.error("Error Stack:", error.stack);
+    console.error("Create lead error:", error);
 
-    // Mongoose validation errors
     if (error.name === "ValidationError") {
       const errors = Object.values(error.errors).map((err) => err.message);
-      console.error("Validation Errors:", errors);
       return res.status(400).json({
         success: false,
         error: "Validation failed",
@@ -100,28 +96,21 @@ exports.createLead = async (req, res) => {
       });
     }
 
-    // Duplicate key error
     if (error.code === 11000) {
-      console.error("Duplicate key error:", error.keyValue);
       return res.status(400).json({
         success: false,
         error: "Duplicate entry found",
-        field: Object.keys(error.keyValue)[0],
       });
     }
-
-    console.error("❌❌❌ END ERROR ❌❌❌");
 
     res.status(500).json({
       success: false,
       error: "Failed to create lead",
-      details:
-        process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
 
-// @desc    Get all leads with pagination, filtering, and sorting
+// @desc    Get all leads with pagination
 // @route   GET /api/leads
 // @access  Private
 exports.getLeads = async (req, res) => {
@@ -140,63 +129,44 @@ exports.getLeads = async (req, res) => {
       endDate,
     } = req.query;
 
-    // Build filter object
+    // Build filter
     const filter = {};
-
     if (status) filter.status = status;
     if (source) filter.source = source;
     if (priority) filter.priority = priority;
     if (assignedTo) filter.assignedTo = assignedTo;
 
-    // Date range filter
+    // Date range
     if (startDate || endDate) {
       filter.createdAt = {};
       if (startDate) filter.createdAt.$gte = new Date(startDate);
       if (endDate) filter.createdAt.$lte = new Date(endDate);
     }
 
-    // Search filter
+    // Search
     if (search) {
       filter.$or = [
         { firstName: { $regex: search, $options: "i" } },
         { lastName: { $regex: search, $options: "i" } },
         { email: { $regex: search, $options: "i" } },
         { company: { $regex: search, $options: "i" } },
-        { jobTitle: { $regex: search, $options: "i" } },
       ];
     }
 
-    // Calculate pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
-
-    // Get total count for pagination info
     const total = await Lead.countDocuments(filter);
 
-    // Fetch leads with pagination and sorting
     const leads = await Lead.find(filter)
       .populate("assignedTo", "name email")
       .populate("createdBy", "name email")
-      .sort({
-        [sortBy]: sortOrder === "desc" ? -1 : 1,
-      })
+      .sort({ [sortBy]: sortOrder === "desc" ? -1 : 1 })
       .skip(skip)
       .limit(parseInt(limit));
 
-    // Get statistics
-    const stats = await Lead.aggregate([
-      { $group: { _id: "$status", count: { $sum: 1 } } },
-    ]);
-
-    // Get distinct values for filters
+    // Get stats for filters
     const statusValues = await Lead.distinct("status");
     const sourceValues = await Lead.distinct("source");
     const priorityValues = await Lead.distinct("priority");
-
-    // Convert stats array to object
-    const statsObj = {};
-    stats.forEach((item) => {
-      statsObj[item._id] = item.count;
-    });
 
     res.json({
       success: true,
@@ -207,11 +177,10 @@ exports.getLeads = async (req, res) => {
         totalItems: total,
         itemsPerPage: parseInt(limit),
       },
-      stats: statsObj,
       filters: {
-        status: [...new Set(statusValues)],
-        source: [...new Set(sourceValues)],
-        priority: [...new Set(priorityValues)],
+        status: statusValues,
+        source: sourceValues,
+        priority: priorityValues,
       },
     });
   } catch (error) {
@@ -229,7 +198,7 @@ exports.getLeads = async (req, res) => {
 exports.getLeadById = async (req, res) => {
   try {
     const lead = await Lead.findById(req.params.id)
-      .populate("assignedTo", "name email avatar")
+      .populate("assignedTo", "name email")
       .populate("createdBy", "name email")
       .populate("notes.createdBy", "name email");
 
@@ -258,22 +227,6 @@ exports.getLeadById = async (req, res) => {
 // @access  Private
 exports.updateLead = async (req, res) => {
   try {
-    const {
-      firstName,
-      lastName,
-      email,
-      phone,
-      company,
-      jobTitle,
-      source,
-      status,
-      budget,
-      priority,
-      assignedTo,
-      nextFollowUp,
-      customFields,
-    } = req.body;
-
     const lead = await Lead.findById(req.params.id);
 
     if (!lead) {
@@ -283,39 +236,49 @@ exports.updateLead = async (req, res) => {
       });
     }
 
-    // Check if email is being changed and if new email already exists
-    if (email && email !== lead.email) {
-      const existingLead = await Lead.findOne({ email });
-      if (existingLead && existingLead._id.toString() !== req.params.id) {
+    // Store old values for notification
+    const oldStatus = lead.status;
+    const oldAssignedTo = lead.assignedTo;
+
+    // Check email uniqueness if being updated
+    if (req.body.email && req.body.email !== lead.email) {
+      const existingLead = await Lead.findOne({ email: req.body.email });
+      if (existingLead) {
         return res.status(400).json({
           success: false,
-          error: "Another lead with this email already exists",
+          error: "Email already in use by another lead",
         });
       }
     }
 
-    // Update fields
-    const updateFields = {};
-    if (firstName !== undefined) updateFields.firstName = firstName;
-    if (lastName !== undefined) updateFields.lastName = lastName;
-    if (email !== undefined) updateFields.email = email;
-    if (phone !== undefined) updateFields.phone = phone;
-    if (company !== undefined) updateFields.company = company;
-    if (jobTitle !== undefined) updateFields.jobTitle = jobTitle;
-    if (source !== undefined) updateFields.source = source;
-    if (status !== undefined) updateFields.status = status;
-    if (budget !== undefined) updateFields.budget = budget;
-    if (priority !== undefined) updateFields.priority = priority;
-    if (assignedTo !== undefined) updateFields.assignedTo = assignedTo;
-    if (nextFollowUp !== undefined) updateFields.nextFollowUp = nextFollowUp;
-    if (customFields !== undefined) updateFields.customFields = customFields;
+    // Update lead
+    const updatedLead = await Lead.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+      runValidators: true,
+    }).populate("assignedTo", "name email");
 
-    // Update the lead
-    const updatedLead = await Lead.findByIdAndUpdate(
-      req.params.id,
-      updateFields,
-      { new: true, runValidators: true },
-    ).populate("assignedTo", "name email");
+    // 🔥 BACKGROUND NOTIFICATIONS
+    setImmediate(() => {
+      // Status change notification
+      if (req.body.status && oldStatus !== req.body.status) {
+        NotificationService.notifyLeadStatusChanged(
+          updatedLead,
+          oldStatus,
+          req.body.status,
+          req.user.id,
+        ).catch(() => {});
+      }
+
+      // Assignment change notification
+      if (
+        req.body.assignedTo &&
+        oldAssignedTo?.toString() !== req.body.assignedTo.toString()
+      ) {
+        NotificationService.notifyLeadCreated(updatedLead, req.user.id).catch(
+          () => {},
+        );
+      }
+    });
 
     res.json({
       success: true,
@@ -383,17 +346,35 @@ exports.addNote = async (req, res) => {
       });
     }
 
-    await lead.addNote(content.trim(), req.user.id);
+    // Add note
+    lead.notes.push({
+      content: content.trim(),
+      createdBy: req.user.id,
+      createdAt: new Date(),
+    });
 
-    const updatedLead = await Lead.findById(req.params.id).populate(
-      "notes.createdBy",
-      "name email",
-    );
+    await lead.save();
+
+    // 🔥 BACKGROUND NOTIFICATION - Only if assigned to someone else
+    if (lead.assignedTo && lead.assignedTo.toString() !== req.user.id) {
+      setImmediate(() => {
+        NotificationService.sendSystemNotification(
+          lead.assignedTo,
+          "New Note Added",
+          `A new note has been added to lead: ${lead.firstName} ${lead.lastName}`,
+          {
+            leadId: lead._id,
+            noteContent:
+              content.substring(0, 50) + (content.length > 50 ? "..." : ""),
+          },
+        ).catch(() => {});
+      });
+    }
 
     res.json({
       success: true,
       message: "Note added successfully",
-      data: updatedLead.notes,
+      data: lead.notes,
     });
   } catch (error) {
     console.error("Add note error:", error);
@@ -409,7 +390,14 @@ exports.addNote = async (req, res) => {
 // @access  Private
 exports.updateLeadStatus = async (req, res) => {
   try {
-    const { status, note } = req.body;
+    const { status } = req.body;
+
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        error: "Status is required",
+      });
+    }
 
     const lead = await Lead.findById(req.params.id);
 
@@ -420,14 +408,24 @@ exports.updateLeadStatus = async (req, res) => {
       });
     }
 
-    await lead.updateStatus(status, note, req.user.id);
+    const oldStatus = lead.status;
+    lead.status = status;
+    await lead.save();
 
-    const updatedLead = await Lead.findById(req.params.id);
+    // 🔥 BACKGROUND NOTIFICATION
+    setImmediate(() => {
+      NotificationService.notifyLeadStatusChanged(
+        lead,
+        oldStatus,
+        status,
+        req.user.id,
+      ).catch(() => {});
+    });
 
     res.json({
       success: true,
       message: "Lead status updated successfully",
-      data: updatedLead,
+      data: lead,
     });
   } catch (error) {
     console.error("Update status error:", error);
@@ -460,7 +458,7 @@ exports.getMyLeads = async (req, res) => {
   }
 };
 
-// @desc    Get leads summary and statistics
+// @desc    Get lead statistics
 // @route   GET /api/leads/summary/stats
 // @access  Private
 exports.getLeadStats = async (req, res) => {
@@ -469,88 +467,18 @@ exports.getLeadStats = async (req, res) => {
       {
         $facet: {
           totalLeads: [{ $count: "count" }],
-          leadsByStatus: [{ $group: { _id: "$status", count: { $sum: 1 } } }],
-          leadsBySource: [{ $group: { _id: "$source", count: { $sum: 1 } } }],
-          leadsByPriority: [
-            { $group: { _id: "$priority", count: { $sum: 1 } } },
-          ],
-          leadsByMonth: [
-            {
-              $group: {
-                _id: {
-                  year: { $year: "$createdAt" },
-                  month: { $month: "$createdAt" },
-                },
-                count: { $sum: 1 },
-              },
-            },
-            { $sort: { "_id.year": -1, "_id.month": -1 } },
-            { $limit: 6 },
-          ],
-          hotLeads: [
-            {
-              $match: {
-                priority: "high",
-                status: { $in: ["new", "contacted", "qualified"] },
-              },
-            },
-            { $count: "count" },
-          ],
-          conversionRate: [
-            {
-              $group: {
-                _id: null,
-                total: { $sum: 1 },
-                converted: {
-                  $sum: { $cond: [{ $eq: ["$status", "closed_won"] }, 1, 0] },
-                },
-              },
-            },
-          ],
+          byStatus: [{ $group: { _id: "$status", count: { $sum: 1 } } }],
+          bySource: [{ $group: { _id: "$source", count: { $sum: 1 } } }],
+          byPriority: [{ $group: { _id: "$priority", count: { $sum: 1 } } }],
         },
       },
     ]);
 
-    // Safely process the results
     const result = {
-      totalLeads:
-        stats && stats[0] && stats[0].totalLeads && stats[0].totalLeads[0]
-          ? stats[0].totalLeads[0].count
-          : 0,
-      leadsByStatus:
-        stats && stats[0] && stats[0].leadsByStatus
-          ? stats[0].leadsByStatus
-          : [],
-      leadsBySource:
-        stats && stats[0] && stats[0].leadsBySource
-          ? stats[0].leadsBySource
-          : [],
-      leadsByPriority:
-        stats && stats[0] && stats[0].leadsByPriority
-          ? stats[0].leadsByPriority
-          : [],
-      leadsByMonth:
-        stats && stats[0] && stats[0].leadsByMonth
-          ? stats[0].leadsByMonth.map((item) => ({
-              month: `${item._id.year}-${item._id.month.toString().padStart(2, "0")}`,
-              count: item.count,
-            }))
-          : [],
-      hotLeads:
-        stats && stats[0] && stats[0].hotLeads && stats[0].hotLeads[0]
-          ? stats[0].hotLeads[0].count
-          : 0,
-      conversionRate:
-        stats &&
-        stats[0] &&
-        stats[0].conversionRate &&
-        stats[0].conversionRate[0]
-          ? (
-              (stats[0].conversionRate[0].converted /
-                stats[0].conversionRate[0].total) *
-              100
-            ).toFixed(2)
-          : "0.00",
+      totalLeads: stats[0]?.totalLeads[0]?.count || 0,
+      byStatus: stats[0]?.byStatus || [],
+      bySource: stats[0]?.bySource || [],
+      byPriority: stats[0]?.byPriority || [],
     };
 
     res.json({
@@ -566,7 +494,7 @@ exports.getLeadStats = async (req, res) => {
   }
 };
 
-// @desc    Bulk update leads (status, assignedTo, etc.)
+// @desc    Bulk update leads
 // @route   PUT /api/leads/bulk-update
 // @access  Private
 exports.bulkUpdateLeads = async (req, res) => {
@@ -580,30 +508,31 @@ exports.bulkUpdateLeads = async (req, res) => {
       });
     }
 
-    if (!updateFields || Object.keys(updateFields).length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: "Update fields are required",
-      });
-    }
-
+    // Allowed fields for bulk update
     const allowedFields = ["status", "assignedTo", "priority", "source"];
-    const filteredUpdateFields = {};
+    const filteredUpdate = {};
 
     Object.keys(updateFields).forEach((key) => {
       if (allowedFields.includes(key)) {
-        filteredUpdateFields[key] = updateFields[key];
+        filteredUpdate[key] = updateFields[key];
       }
     });
 
+    if (Object.keys(filteredUpdate).length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: "No valid fields to update",
+      });
+    }
+
     const result = await Lead.updateMany(
       { _id: { $in: leadIds } },
-      { $set: filteredUpdateFields },
+      { $set: filteredUpdate },
     );
 
     res.json({
       success: true,
-      message: `Successfully updated ${result.modifiedCount} leads`,
+      message: `Updated ${result.modifiedCount} leads successfully`,
       data: {
         matched: result.matchedCount,
         modified: result.modifiedCount,

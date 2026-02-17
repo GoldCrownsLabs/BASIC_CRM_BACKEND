@@ -1,4 +1,6 @@
 const Contact = require("../models/Contact");
+const User = require("../models/User");
+const NotificationService = require("../services/notificationService");
 
 // ===============================
 // @desc    Get all contacts with pagination and filters
@@ -49,7 +51,7 @@ const getContacts = async (req, res) => {
     if (search && search.trim()) {
       const searchRegex = new RegExp(
         search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-        "i"
+        "i",
       );
       query.$or = [
         { firstName: searchRegex },
@@ -269,6 +271,17 @@ const createContact = async (req, res, next) => {
 
     const contact = await Contact.create(contactData);
 
+    // 🔥 BACKGROUND NOTIFICATION - New contact created
+    setImmediate(() => {
+      NotificationService.notifyContactCreated(contact, req.user.id)
+        .then(() => {
+          console.log(`📨 Contact notification sent: ${contact._id}`);
+        })
+        .catch(() => {
+          // Silent fail - user ko kuch nahi dikhana
+        });
+    });
+
     // Remove version key from response
     const contactResponse = contact.toObject();
     delete contactResponse.__v;
@@ -314,6 +327,24 @@ const createContact = async (req, res, next) => {
 // ===============================
 const updateContact = async (req, res) => {
   try {
+    // Find existing contact first to track changes
+    const existingContact = await Contact.findOne({
+      _id: req.params.id,
+      userId: req.user.id,
+      isDeleted: false,
+    });
+
+    if (!existingContact) {
+      return res.status(404).json({
+        success: false,
+        message: "Contact not found",
+      });
+    }
+
+    // Store old values for notification
+    const oldCompany = existingContact.company;
+    const oldTags = existingContact.tags;
+
     // Allowed fields for update
     const allowedUpdates = [
       "firstName",
@@ -346,14 +377,14 @@ const updateContact = async (req, res) => {
     if (updates.email && updates.email.trim()) {
       updates.email = updates.email.toLowerCase();
 
-      const existingContact = await Contact.findOne({
+      const duplicateContact = await Contact.findOne({
         _id: { $ne: req.params.id },
         userId: req.user.id,
         email: updates.email,
         isDeleted: false,
       });
 
-      if (existingContact) {
+      if (duplicateContact) {
         return res.status(400).json({
           success: false,
           message: "Another contact with this email already exists",
@@ -375,15 +406,19 @@ const updateContact = async (req, res) => {
       {
         new: true,
         runValidators: true,
-      }
+      },
     ).select("-__v");
 
-    if (!contact) {
-      return res.status(404).json({
-        success: false,
-        message: "Contact not found",
-      });
-    }
+    // 🔥 BACKGROUND NOTIFICATION - Contact updated (if company changed)
+    setImmediate(() => {
+      // Only send notification if important fields changed
+      if (updates.company && oldCompany !== updates.company) {
+        // Company changed - notify team/managers
+        NotificationService.notifyContactCreated(contact, req.user.id).catch(
+          () => {},
+        );
+      }
+    });
 
     res.status(200).json({
       success: true,
@@ -436,10 +471,24 @@ const toggleFavorite = async (req, res) => {
       });
     }
 
+    // Store old value
+    const wasFavorite = contact.isFavorite;
+
     // Toggle favorite status
     contact.isFavorite = !contact.isFavorite;
     contact.lastModified = Date.now();
     await contact.save();
+
+    // 🔥 BACKGROUND NOTIFICATION - Favorite toggled (optional)
+    if (wasFavorite !== contact.isFavorite) {
+      setImmediate(() => {
+        // You can send a system notification if needed
+        // Or just log it
+        console.log(
+          `⭐ Contact ${contact._id} favorite toggled to ${contact.isFavorite}`,
+        );
+      });
+    }
 
     // Remove version key from response
     const contactResponse = contact.toObject();
@@ -489,7 +538,7 @@ const deleteContact = async (req, res) => {
       },
       {
         new: true,
-      }
+      },
     );
 
     if (!contact) {
@@ -701,7 +750,7 @@ const batchSyncContacts = async (req, res) => {
 
           if (existingContact) {
             throw new Error(
-              `Email ${processedData.email} already exists in another contact`
+              `Email ${processedData.email} already exists in another contact`,
             );
           }
         }
@@ -723,7 +772,7 @@ const batchSyncContacts = async (req, res) => {
               new: true,
               runValidators: true,
               upsert: false,
-            }
+            },
           );
 
           if (contact) {
@@ -737,6 +786,14 @@ const batchSyncContacts = async (req, res) => {
             });
             await newContact.save();
             results.created.push(newContact._id.toString());
+
+            // 🔥 BACKGROUND NOTIFICATION for batch created contact
+            setImmediate(() => {
+              NotificationService.notifyContactCreated(
+                newContact,
+                req.user.id,
+              ).catch(() => {});
+            });
           }
         } else {
           // Create new contact
@@ -746,6 +803,14 @@ const batchSyncContacts = async (req, res) => {
           });
           await newContact.save();
           results.created.push(newContact._id.toString());
+
+          // 🔥 BACKGROUND NOTIFICATION for batch created contact
+          setImmediate(() => {
+            NotificationService.notifyContactCreated(
+              newContact,
+              req.user.id,
+            ).catch(() => {});
+          });
         }
       } catch (error) {
         results.errors.push({
