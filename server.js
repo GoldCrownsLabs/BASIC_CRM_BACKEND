@@ -83,6 +83,10 @@ app.get("/", (req, res) => {
     message: "CRM API is Running",
     version: "1.0.0",
     environment: process.env.NODE_ENV || "development",
+    features: {
+      templates: "✅ Email templates with free testing",
+      whatsapp: "⏳ Coming soon",
+    },
   });
 });
 
@@ -93,6 +97,7 @@ app.get("/health", (req, res) => {
     timestamp: new Date().toISOString(),
     database:
       mongoose.connection.readyState === 1 ? "Connected" : "Disconnected",
+    emailService: "✅ Ethereal (Testing Mode)",
   };
 
   if (mongoose.connection.readyState !== 1) {
@@ -110,6 +115,7 @@ app.get("/health", (req, res) => {
   });
 });
 
+// ============ IMPORT ROUTES ============
 const authRoutes = require("./routes/auth");
 const leadRoutes = require("./routes/leads");
 const taskRoutes = require("./routes/tasks");
@@ -118,7 +124,9 @@ const dashboardRoutes = require("./routes/dashboard");
 const activitiesRoute = require("./routes/activities");
 const notificationRoutes = require("./routes/notifications");
 const calendarRoutes = require("./routes/calendarRoutes");
+const templateRoutes = require("./routes/templateRoutes"); // ✅ NEW: Template routes
 
+// ============ USE ROUTES ============
 app.use("/api/auth", authRoutes);
 app.use("/api/leads", leadRoutes);
 app.use("/api/tasks", taskRoutes);
@@ -127,15 +135,48 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/activities", activitiesRoute);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/calendar", calendarRoutes);
+app.use("/api/templates", templateRoutes); // ✅ NEW: Template routes mounted
 
+// ============ TEST EMAIL ROUTE (Quick test) ============
+app.get("/test-email", async (req, res) => {
+  try {
+    const { sendTestEmail } = require("./utils/emailService");
+    const result = await sendTestEmail();
+    res.json({
+      success: true,
+      message: "Test email sent! Check preview URL",
+      previewUrl: result.previewUrl,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+});
+
+// ============ 404 Handler ============
 app.use((req, res) => {
   res.status(404).json({
     success: false,
     error: `Route not found: ${req.method} ${req.originalUrl}`,
     timestamp: new Date().toISOString(),
+    availableRoutes: {
+      auth: "/api/auth",
+      leads: "/api/leads",
+      tasks: "/api/tasks",
+      contacts: "/api/contacts",
+      dashboard: "/api/dashboard",
+      activities: "/api/activities",
+      notifications: "/api/notifications",
+      calendar: "/api/calendar",
+      templates: "/api/templates", // ✅ Show in available routes
+      docs: "/api-docs",
+    },
   });
 });
 
+// ============ Error Handler ============
 app.use((err, req, res, next) => {
   console.error("Global Error Handler:", err.message);
 
@@ -188,6 +229,9 @@ server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📚 API Docs: http://localhost:${PORT}/api-docs`);
   console.log(`🔌 Socket.IO: ws://localhost:${PORT}`);
+  console.log(`📧 Email Templates: http://localhost:${PORT}/api/templates`);
+  console.log(`📧 Test Email: http://localhost:${PORT}/test-email`);
+  console.log(`✅ Email Service: Ethereal (Testing Mode - Free)`);
 });
 
 const gracefulShutdown = (signal) => {
