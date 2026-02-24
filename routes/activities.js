@@ -69,6 +69,7 @@ router.patch(
   "/:id/complete",
   authActivity.checkActivityOwnership,
   activityController.markAsCompleted
+  
 );
 
 // @route   DELETE /api/activities/:id
