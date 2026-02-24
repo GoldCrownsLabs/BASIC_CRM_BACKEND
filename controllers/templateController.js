@@ -54,7 +54,7 @@ const createTemplate = async (req, res) => {
 };
 
 /**
- * @desc    Get all templates
+ * @desc    Get all templates - Only user's own templates
  * @route   GET /api/templates
  * @access  Private
  */
@@ -62,6 +62,9 @@ const getTemplates = async (req, res) => {
   try {
     const { type, status } = req.query;
     const filter = {};
+
+    // ✅ Only show templates created by the logged-in user
+    filter.createdBy = req.user._id;
 
     if (type) filter.type = type;
     if (status) filter.status = status;
@@ -83,6 +86,8 @@ const getTemplates = async (req, res) => {
     });
   }
 };
+
+
 
 /**
  * @desc    Get single template
@@ -119,7 +124,7 @@ const getTemplateById = async (req, res) => {
 /**
  * @desc    Update template
  * @route   PUT /api/templates/:id
- * @access  Private
+ * @access  Private (Creator or Admin only)
  */
 const updateTemplate = async (req, res) => {
   try {
@@ -132,14 +137,15 @@ const updateTemplate = async (req, res) => {
       });
     }
 
-    // Check if user is creator or admin
-    if (
-      template.createdBy.toString() !== req.user._id.toString() &&
-      req.user.role !== "admin"
-    ) {
+    // ✅ CREATOR CHECK: Only creator or admin can update
+    const isCreator = template.createdBy.toString() === req.user._id.toString();
+    const isAdmin = req.user.role === "admin";
+
+    if (!isCreator && !isAdmin) {
       return res.status(403).json({
         success: false,
-        message: "Not authorized to update this template",
+        message:
+          "You can only update your own templates. This template was created by someone else.",
       });
     }
 
@@ -164,7 +170,7 @@ const updateTemplate = async (req, res) => {
 /**
  * @desc    Delete template
  * @route   DELETE /api/templates/:id
- * @access  Private (Admin only)
+ * @access  Private (Creator or Admin only)
  */
 const deleteTemplate = async (req, res) => {
   try {
@@ -177,6 +183,23 @@ const deleteTemplate = async (req, res) => {
       });
     }
 
+    // ✅ CREATOR CHECK: Only creator or admin can delete
+    const isCreator = template.createdBy.toString() === req.user._id.toString();
+    const isAdmin = req.user.role === "admin";
+
+    if (!isCreator && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "You can only delete your own templates. This template was created by someone else.",
+      });
+    }
+
+    // Log who is deleting
+    console.log(
+      `🗑️ Template "${template.name}" deleted by ${isAdmin ? "admin" : "creator"} ${req.user.email}`,
+    );
+
     await template.deleteOne();
 
     res.json({
@@ -188,12 +211,13 @@ const deleteTemplate = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to delete template",
+      error: error.message,
     });
   }
 };
 
 /**
- * @desc    Send template to leads (BREVO REAL EMAILS ONLY)
+ * @desc    Send template to leads
  * @route   POST /api/templates/:id/send
  * @access  Private
  */
@@ -277,7 +301,7 @@ const sendTemplateToLeads = async (req, res) => {
         console.log("📨 Recipients prepared:", recipients);
 
         try {
-          // ✅ Send emails via Brevo
+          // Send emails via Brevo
           const emailResults = await sendBulkEmails(
             recipients,
             template.subject,
@@ -474,7 +498,7 @@ const getVariablesHelp = async (req, res) => {
       {
         name: "date",
         description: "Current date",
-        example: "23/02/2026",
+        example: "24/02/2026",
       },
     ],
     howToUse:

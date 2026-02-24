@@ -1,6 +1,7 @@
 const Lead = require("../models/Lead");
 const User = require("../models/User");
 const NotificationService = require("../services/notificationService");
+const mongoose = require("mongoose"); // ✅ Add this
 
 // @desc    Create a new lead
 // @route   POST /api/leads
@@ -39,8 +40,12 @@ exports.createLead = async (req, res) => {
       });
     }
 
-    // Check for existing lead
-    const existingLead = await Lead.findOne({ email });
+    // Check for existing lead (only among user's leads)
+    const existingLead = await Lead.findOne({
+      email,
+      createdBy: req.user.id, // 👈 ADDED
+    });
+
     if (existingLead) {
       return res.status(400).json({
         success: false,
@@ -68,14 +73,14 @@ exports.createLead = async (req, res) => {
 
     await lead.save();
 
-    // 🔥 BACKGROUND NOTIFICATION - User ko kuch nahi dikhega
+    // 🔥 BACKGROUND NOTIFICATION
     setImmediate(() => {
       NotificationService.notifyLeadCreated(lead, req.user.id)
         .then(() => {
           console.log(`📨 Lead notification sent: ${lead._id}`);
         })
         .catch(() => {
-          // Silent fail - kuch mat karo
+          // Silent fail
         });
     });
 
@@ -110,7 +115,7 @@ exports.createLead = async (req, res) => {
   }
 };
 
-// @desc    Get all leads with pagination
+// @desc    Get all leads with pagination - ✅ FIXED
 // @route   GET /api/leads
 // @access  Private
 exports.getLeads = async (req, res) => {
@@ -129,8 +134,12 @@ exports.getLeads = async (req, res) => {
       endDate,
     } = req.query;
 
-    // Build filter
-    const filter = {};
+    // ✅ FIXED: Always filter by current user
+    const filter = {
+      createdBy: req.user.id,
+    };
+
+    // Add optional filters
     if (status) filter.status = status;
     if (source) filter.source = source;
     if (priority) filter.priority = priority;
@@ -163,10 +172,16 @@ exports.getLeads = async (req, res) => {
       .skip(skip)
       .limit(parseInt(limit));
 
-    // Get stats for filters
-    const statusValues = await Lead.distinct("status");
-    const sourceValues = await Lead.distinct("source");
-    const priorityValues = await Lead.distinct("priority");
+    // Get stats for filters (only for user's leads)
+    const statusValues = await Lead.distinct("status", {
+      createdBy: req.user.id,
+    });
+    const sourceValues = await Lead.distinct("source", {
+      createdBy: req.user.id,
+    });
+    const priorityValues = await Lead.distinct("priority", {
+      createdBy: req.user.id,
+    });
 
     res.json({
       success: true,
@@ -192,12 +207,16 @@ exports.getLeads = async (req, res) => {
   }
 };
 
-// @desc    Get single lead by ID
+// @desc    Get single lead by ID - ✅ FIXED
 // @route   GET /api/leads/:id
 // @access  Private
 exports.getLeadById = async (req, res) => {
   try {
-    const lead = await Lead.findById(req.params.id)
+    // ✅ FIXED: Check ownership
+    const lead = await Lead.findOne({
+      _id: req.params.id,
+      createdBy: req.user.id,
+    })
       .populate("assignedTo", "name email")
       .populate("createdBy", "name email")
       .populate("notes.createdBy", "name email");
@@ -215,6 +234,14 @@ exports.getLeadById = async (req, res) => {
     });
   } catch (error) {
     console.error("Get lead by ID error:", error);
+
+    if (error.kind === "ObjectId") {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid lead ID format",
+      });
+    }
+
     res.status(500).json({
       success: false,
       error: "Failed to fetch lead",
@@ -222,17 +249,21 @@ exports.getLeadById = async (req, res) => {
   }
 };
 
-// @desc    Update lead
+// @desc    Update lead - ✅ FIXED
 // @route   PUT /api/leads/:id
 // @access  Private
 exports.updateLead = async (req, res) => {
   try {
-    const lead = await Lead.findById(req.params.id);
+    // ✅ FIXED: Check ownership
+    const lead = await Lead.findOne({
+      _id: req.params.id,
+      createdBy: req.user.id,
+    });
 
     if (!lead) {
       return res.status(404).json({
         success: false,
-        error: "Lead not found",
+        error: "Lead not found or you don't have permission",
       });
     }
 
@@ -240,9 +271,13 @@ exports.updateLead = async (req, res) => {
     const oldStatus = lead.status;
     const oldAssignedTo = lead.assignedTo;
 
-    // Check email uniqueness if being updated
+    // Check email uniqueness if being updated (only among user's leads)
     if (req.body.email && req.body.email !== lead.email) {
-      const existingLead = await Lead.findOne({ email: req.body.email });
+      const existingLead = await Lead.findOne({
+        email: req.body.email,
+        createdBy: req.user.id,
+        _id: { $ne: req.params.id },
+      });
       if (existingLead) {
         return res.status(400).json({
           success: false,
@@ -287,6 +322,14 @@ exports.updateLead = async (req, res) => {
     });
   } catch (error) {
     console.error("Update lead error:", error);
+
+    if (error.kind === "ObjectId") {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid lead ID format",
+      });
+    }
+
     res.status(500).json({
       success: false,
       error: "Failed to update lead",
@@ -294,21 +337,23 @@ exports.updateLead = async (req, res) => {
   }
 };
 
-// @desc    Delete lead
+// @desc    Delete lead - ✅ FIXED
 // @route   DELETE /api/leads/:id
 // @access  Private
 exports.deleteLead = async (req, res) => {
   try {
-    const lead = await Lead.findById(req.params.id);
+    // ✅ FIXED: Check ownership and delete in one go
+    const lead = await Lead.findOneAndDelete({
+      _id: req.params.id,
+      createdBy: req.user.id,
+    });
 
     if (!lead) {
       return res.status(404).json({
         success: false,
-        error: "Lead not found",
+        error: "Lead not found or you don't have permission",
       });
     }
-
-    await lead.deleteOne();
 
     res.json({
       success: true,
@@ -316,6 +361,14 @@ exports.deleteLead = async (req, res) => {
     });
   } catch (error) {
     console.error("Delete lead error:", error);
+
+    if (error.kind === "ObjectId") {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid lead ID format",
+      });
+    }
+
     res.status(500).json({
       success: false,
       error: "Failed to delete lead",
@@ -323,7 +376,7 @@ exports.deleteLead = async (req, res) => {
   }
 };
 
-// @desc    Add note to lead
+// @desc    Add note to lead - ✅ FIXED
 // @route   POST /api/leads/:id/notes
 // @access  Private
 exports.addNote = async (req, res) => {
@@ -337,12 +390,16 @@ exports.addNote = async (req, res) => {
       });
     }
 
-    const lead = await Lead.findById(req.params.id);
+    // ✅ FIXED: Check ownership
+    const lead = await Lead.findOne({
+      _id: req.params.id,
+      createdBy: req.user.id,
+    });
 
     if (!lead) {
       return res.status(404).json({
         success: false,
-        error: "Lead not found",
+        error: "Lead not found or you don't have permission",
       });
     }
 
@@ -371,6 +428,9 @@ exports.addNote = async (req, res) => {
       });
     }
 
+    // Populate the new note for response
+    await lead.populate("notes.createdBy", "name email");
+
     res.json({
       success: true,
       message: "Note added successfully",
@@ -378,6 +438,14 @@ exports.addNote = async (req, res) => {
     });
   } catch (error) {
     console.error("Add note error:", error);
+
+    if (error.kind === "ObjectId") {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid lead ID format",
+      });
+    }
+
     res.status(500).json({
       success: false,
       error: "Failed to add note",
@@ -385,7 +453,7 @@ exports.addNote = async (req, res) => {
   }
 };
 
-// @desc    Update lead status
+// @desc    Update lead status - ✅ FIXED
 // @route   PATCH /api/leads/:id/status
 // @access  Private
 exports.updateLeadStatus = async (req, res) => {
@@ -399,12 +467,16 @@ exports.updateLeadStatus = async (req, res) => {
       });
     }
 
-    const lead = await Lead.findById(req.params.id);
+    // ✅ FIXED: Check ownership
+    const lead = await Lead.findOne({
+      _id: req.params.id,
+      createdBy: req.user.id,
+    });
 
     if (!lead) {
       return res.status(404).json({
         success: false,
-        error: "Lead not found",
+        error: "Lead not found or you don't have permission",
       });
     }
 
@@ -429,6 +501,14 @@ exports.updateLeadStatus = async (req, res) => {
     });
   } catch (error) {
     console.error("Update status error:", error);
+
+    if (error.kind === "ObjectId") {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid lead ID format",
+      });
+    }
+
     res.status(500).json({
       success: false,
       error: "Failed to update lead status",
@@ -436,7 +516,7 @@ exports.updateLeadStatus = async (req, res) => {
   }
 };
 
-// @desc    Get leads assigned to current user
+// @desc    Get leads assigned to current user - ✅ GOOD
 // @route   GET /api/leads/assigned/me
 // @access  Private
 exports.getMyLeads = async (req, res) => {
@@ -458,12 +538,18 @@ exports.getMyLeads = async (req, res) => {
   }
 };
 
-// @desc    Get lead statistics
+// @desc    Get lead statistics - ✅ FIXED
 // @route   GET /api/leads/summary/stats
 // @access  Private
 exports.getLeadStats = async (req, res) => {
   try {
+    // ✅ FIXED: Only count user's leads
     const stats = await Lead.aggregate([
+      {
+        $match: {
+          createdBy: new mongoose.Types.ObjectId(req.user.id),
+        },
+      },
       {
         $facet: {
           totalLeads: [{ $count: "count" }],
@@ -494,7 +580,7 @@ exports.getLeadStats = async (req, res) => {
   }
 };
 
-// @desc    Bulk update leads
+// @desc    Bulk update leads - ✅ FIXED
 // @route   PUT /api/leads/bulk-update
 // @access  Private
 exports.bulkUpdateLeads = async (req, res) => {
@@ -525,8 +611,12 @@ exports.bulkUpdateLeads = async (req, res) => {
       });
     }
 
+    // ✅ FIXED: Only update user's own leads
     const result = await Lead.updateMany(
-      { _id: { $in: leadIds } },
+      {
+        _id: { $in: leadIds },
+        createdBy: req.user.id,
+      },
       { $set: filteredUpdate },
     );
 

@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const express = require("express");
 const router = express.Router();
 const { protect } = require("../middleware/auth");
+const calendarAuth = require("../middleware/calendarAuth"); // ✅ Import karo
 const {
   validateEvent,
   validateQuickAddEvent,
@@ -16,14 +17,13 @@ const {
   getCalendarStats,
 } = require("../controllers/calendarController");
 
-// Calendar Routes
+// Calendar Routes - Already have userId filter in queries ✅
 router.get("/", protect, getCalendarEvents);
 router.get("/stats", protect, getCalendarStats);
 router.get("/agenda", protect, getAgendaView);
-// router.get("/upcoming", protect, getUpcomingEvents);
 router.get("/date/:date", protect, getEventsByDate);
 
-// Simple create event endpoint (if not in calculatorController)
+// ✅ Event Creation - User ID assign ho raha hai
 router.post("/", protect, validateEvent, async (req, res) => {
   try {
     const CalendarEvent = require("../models/CalendarEvent");
@@ -89,46 +89,126 @@ router.post("/", protect, validateEvent, async (req, res) => {
   }
 });
 
-// Simple get single event
-router.get("/event/:id", protect, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const CalendarEvent = require("../models/CalendarEvent");
+// ✅ Get single event - WITH OWNERSHIP CHECK
+router.get(
+  "/event/:id",
+  protect,
+  calendarAuth.checkEventOwnership,
+  async (req, res) => {
+    try {
+      const event = req.event; // Middleware se mil gaya
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
+      res.json({
+        success: true,
+        data: event,
+      });
+    } catch (error) {
+      console.error("Get event error:", error);
+      res.status(500).json({
         success: false,
-        message: "Invalid event ID",
+        message: "Failed to fetch event",
       });
     }
+  },
+);
 
-    const event = await CalendarEvent.findOne({
-      _id: id,
-      $or: [{ assignedTo: req.user._id }, { createdBy: req.user._id }],
-    })
-      .populate("contactId", "name email phone avatar company")
-      .populate("assignedTo", "name email avatar role")
-      .populate("createdBy", "name email");
+// ✅ UPDATE EVENT - Add ownership check
+router.put(
+  "/event/:id",
+  protect,
+  calendarAuth.checkEventOwnership,
+  calendarAuth.checkCanModify,
+  async (req, res) => {
+    try {
+      const CalendarEvent = require("../models/CalendarEvent");
+      const updatedEvent = await CalendarEvent.findByIdAndUpdate(
+        req.params.id,
+        req.body,
+        { new: true, runValidators: true },
+      )
+        .populate("contactId", "name email phone avatar")
+        .populate("assignedTo", "name email avatar role")
+        .populate("createdBy", "name email");
 
-    if (!event) {
-      return res.status(404).json({
+      res.json({
+        success: true,
+        message: "Event updated successfully",
+        data: updatedEvent,
+      });
+    } catch (error) {
+      console.error("Update event error:", error);
+      res.status(500).json({
         success: false,
-        message: "Event not found",
+        message: "Failed to update event",
       });
     }
+  },
+);
 
-    res.json({
-      success: true,
-      data: event,
-    });
-  } catch (error) {
-    console.error("Get event error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch event",
-    });
-  }
-});
+// ✅ DELETE EVENT - Add ownership check
+router.delete(
+  "/event/:id",
+  protect,
+  calendarAuth.checkEventOwnership,
+  async (req, res) => {
+    try {
+      const CalendarEvent = require("../models/CalendarEvent");
+      await CalendarEvent.findByIdAndDelete(req.params.id);
+
+      // Socket notification for deletion
+      if (global.io) {
+        global.io.to(`user_${req.user._id}`).emit("event:deleted", {
+          eventId: req.params.id,
+          message: "Event deleted",
+        });
+      }
+
+      res.json({
+        success: true,
+        message: "Event deleted successfully",
+      });
+    } catch (error) {
+      console.error("Delete event error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to delete event",
+      });
+    }
+  },
+);
+
+// ✅ COMPLETE EVENT - Add ownership check
+router.patch(
+  "/event/:id/complete",
+  protect,
+  calendarAuth.checkEventOwnership,
+  async (req, res) => {
+    try {
+      const CalendarEvent = require("../models/CalendarEvent");
+      const event = await CalendarEvent.findByIdAndUpdate(
+        req.params.id,
+        {
+          status: "completed",
+          completedAt: new Date(),
+          lastModified: Date.now(),
+        },
+        { new: true },
+      );
+
+      res.json({
+        success: true,
+        message: "Event marked as completed",
+        data: event,
+      });
+    } catch (error) {
+      console.error("Complete event error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to complete event",
+      });
+    }
+  },
+);
 
 // Event Type Management
 router.get("/types", protect, async (req, res) => {
@@ -148,7 +228,7 @@ router.get("/types", protect, async (req, res) => {
   }
 });
 
-// Quick Actions
+// Quick Actions - User ID assign ho raha hai ✅
 router.post("/quick-add", protect, validateQuickAddEvent, async (req, res) => {
   try {
     const {
@@ -231,81 +311,6 @@ router.post("/test-notification", protect, async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to send test notification",
-    });
-  }
-});
-
-router.get("/types", protect, async (req, res) => {
-  try {
-    let EventType;
-    try {
-      EventType = require("../models/EventType");
-    } catch (error) {
-      // If EventType model doesn't exist, return default data
-      console.warn("EventType model not found, returning default types");
-      return res.json({
-        success: true,
-        data: [
-          {
-            _id: "1",
-            name: "Meeting",
-            color: "#3B82F6",
-            icon: "users",
-            isActive: true,
-            order: 1,
-          },
-          {
-            _id: "2",
-            name: "Appointment",
-            color: "#10B981",
-            icon: "calendar",
-            isActive: true,
-            order: 2,
-          },
-          {
-            _id: "3",
-            name: "Task",
-            color: "#F59E0B",
-            icon: "check-circle",
-            isActive: true,
-            order: 3,
-          },
-          {
-            _id: "4",
-            name: "Reminder",
-            color: "#EF4444",
-            icon: "bell",
-            isActive: true,
-            order: 4,
-          },
-          {
-            _id: "5",
-            name: "Personal",
-            color: "#8B5CF6",
-            icon: "user",
-            isActive: true,
-            order: 5,
-          },
-        ],
-      });
-    }
-
-    const types = await EventType.find({ isActive: true }).sort("order");
-    res.json({
-      success: true,
-      data: types,
-    });
-  } catch (error) {
-    console.error("Get event types error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch event types",
-      // Optional: Add default data as fallback
-      fallbackData: [
-        { _id: "1", name: "Meeting", color: "#3B82F6", icon: "users" },
-        { _id: "2", name: "Appointment", color: "#10B981", icon: "calendar" },
-        { _id: "3", name: "Task", color: "#F59E0B", icon: "check-circle" },
-      ],
     });
   }
 });

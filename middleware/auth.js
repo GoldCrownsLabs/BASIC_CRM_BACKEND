@@ -8,7 +8,6 @@ const User = require("../models/User");
 const protect = async (req, res, next) => {
   try {
     let token;
-    
 
     // ✅ Check Authorization header
     if (
@@ -77,6 +76,81 @@ const protect = async (req, res, next) => {
 };
 
 /**
+ * @desc   Check if user is accessing their own data
+ * @usage  router.get("/:userId", protect, checkOwnership, controller)
+ */
+const checkOwnership = (req, res, next) => {
+  try {
+    // Check different possible parameter names
+    const requestedUserId =
+      req.params.userId || req.params.id || req.body.userId;
+
+    // Agar koi userId param mein hai to check karo
+    if (requestedUserId) {
+      if (
+        requestedUserId !== req.user.id &&
+        requestedUserId !== req.user._id.toString()
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: "You are not authorized to access this user's data",
+        });
+      }
+    }
+
+    // Agar koi userId nahi hai, to assumedly logged in user apna data access kar raha hai
+    next();
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Error checking ownership",
+    });
+  }
+};
+
+/**
+ * @desc   Check if address belongs to logged in user
+ * @usage  router.delete("/addresses/:addressId", protect, checkAddressOwnership, controller)
+ */
+const checkAddressOwnership = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const addressId = req.params.addressId;
+    if (addressId) {
+      const address = user.addresses.find(
+        (addr) => addr._id.toString() === addressId,
+      );
+
+      if (!address) {
+        return res.status(404).json({
+          success: false,
+          message: "Address not found or does not belong to you",
+        });
+      }
+
+      // Optional: attach address to request for further use
+      req.address = address;
+    }
+
+    next();
+  } catch (error) {
+    console.error("Address ownership check error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error checking address ownership",
+    });
+  }
+};
+
+/**
  * @desc   Admin only access
  * @usage  router.delete("/", protect, admin, controller)
  */
@@ -91,7 +165,44 @@ const admin = (req, res, next) => {
   });
 };
 
+/**
+ * @desc   Check if user is accessing their own profile OR is admin
+ * @usage  router.get("/:userId", protect, selfOrAdmin, controller)
+ */
+const selfOrAdmin = (req, res, next) => {
+  try {
+    const requestedUserId = req.params.userId || req.params.id;
+
+    // Admin can access anyone's data
+    if (req.user.role === "admin") {
+      return next();
+    }
+
+    // Non-admin can only access their own data
+    if (
+      requestedUserId &&
+      requestedUserId !== req.user.id &&
+      requestedUserId !== req.user._id.toString()
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only access your own profile",
+      });
+    }
+
+    next();
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Error checking permissions",
+    });
+  }
+};
+
 module.exports = {
   protect,
   admin,
+  checkOwnership,
+  checkAddressOwnership,
+  selfOrAdmin,
 };
