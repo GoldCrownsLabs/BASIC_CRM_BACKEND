@@ -3,7 +3,6 @@ require("dotenv").config();
 
 // ============ BREVO CONFIGURATION (Real Emails) ============
 
-// 🔵 Brevo Configuration - यही हमारा real email provider है
 const BREVO_CONFIG = {
   host: process.env.BREVO_HOST || "smtp-relay.brevo.com",
   port: parseInt(process.env.BREVO_PORT) || 587,
@@ -15,7 +14,6 @@ const BREVO_CONFIG = {
 
 // ============ BREVO TRANSPORTER ============
 
-// 🔵 Create Brevo Transporter (Real Emails)
 const createBrevoTransporter = () => {
   // Password check
   if (!BREVO_CONFIG.pass) {
@@ -97,7 +95,7 @@ const sendEmail = async ({ to, subject, html, from = null }) => {
       response: info.response,
       provider: "Brevo",
       to: to,
-      from: fromAddress, // ✅ from भी return करो
+      from: fromAddress, 
     };
   } catch (error) {
     console.error(`❌ Email send error:`, error.message);
@@ -122,13 +120,12 @@ const sendTemplateEmail = async ({
     to,
     subject: processedSubject,
     html: processedHtml,
-    from: from || BREVO_CONFIG.from, // ✅ from पास करो
+    from: from || BREVO_CONFIG.from,
   });
 };
 
-// ✅ FIXED: Send bulk emails (options parameter add किया)
 const sendBulkEmails = async (recipients, subject, template, options = {}) => {
-  const { from = BREVO_CONFIG.from } = options; // ✅ options से from निकालो
+  const { from = BREVO_CONFIG.from } = options; 
 
   const results = {
     total: recipients.length,
@@ -155,14 +152,14 @@ const sendBulkEmails = async (recipients, subject, template, options = {}) => {
         subject: subject,
         template: template,
         variables: variables,
-        from: from, // ✅ from पास करो
+        from: from, 
       });
 
       results.successful.push({
         email: recipient.email,
         name: recipient.name,
         messageId: result.messageId,
-        from: result.from, // ✅ from भी store करो
+        from: result.from, 
       });
 
       console.log(`✅ Sent to ${recipient.email}`);
@@ -190,7 +187,7 @@ const sendTestEmail = async () => {
   console.log(`🚀 Sending test email via Brevo...`);
 
   const testData = {
-    to: "avinashkumarpandey@gmail.com", // ✅ अपना real email डालो
+    to: "avinashkumarpandey@gmail.com", 
     subject: "Test Email from CRM",
     template: `
       <!DOCTYPE html>
@@ -231,7 +228,7 @@ const sendTestEmail = async () => {
       subject: testData.subject,
       template: testData.template,
       variables: testData.variables,
-      from: BREVO_CONFIG.from, // ✅ from पास करो
+      from: BREVO_CONFIG.from, 
     });
 
     console.log("\n✅ Test email sent successfully!");
