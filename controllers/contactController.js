@@ -20,6 +20,7 @@ const getContacts = async (req, res) => {
       source,
     } = req.query;
 
+    
     // Validate and sanitize inputs
     const pageNum = Math.max(parseInt(page), 1);
     const limitNum = Math.min(parseInt(limit), 100);
@@ -82,26 +83,60 @@ const getContacts = async (req, res) => {
       query.source = source;
     }
 
-    // Execute query with pagination
-    const contacts = await Contact.find(query)
+    // 🟢 FIRST: Get ALL contacts (without pagination) to remove duplicates
+    let allContacts = await Contact.find(query)
       .sort({ [sortField]: sortOrder })
-      .limit(limitNum)
-      .skip((pageNum - 1) * limitNum)
       .select("-__v");
 
-    // Get total count for pagination
-    const total = await Contact.countDocuments(query);
+    // 🟢 Remove duplicates by _id
+    const uniqueContacts = [];
+    const seenIds = new Set();
+    const duplicateIds = [];
+
+    for (const contact of allContacts) {
+      const id = contact._id.toString();
+      if (!seenIds.has(id)) {
+        seenIds.add(id);
+        uniqueContacts.push(contact);
+      } else {
+        duplicateIds.push(id);
+        console.warn(`⚠️ Duplicate ID found and removed: ${id}`);
+      }
+    }
+
+    // 🟢 Calculate pagination on unique contacts
+    const totalUnique = uniqueContacts.length;
+
+    // 🟢 Apply pagination to unique contacts
+    const startIndex = (pageNum - 1) * limitNum;
+    const endIndex = startIndex + limitNum;
+    const paginatedContacts = uniqueContacts.slice(startIndex, endIndex);
+
+    // 🟢 Log duplicate info for debugging
+    if (duplicateIds.length > 0) {
+      console.warn(
+        `⚠️ Total ${duplicateIds.length} duplicate contacts found for user ${req.user.id}`,
+      );
+
+      // 🔴 OPTIONAL: Delete duplicates from database (uncomment if you want to clean up)
+      // await Contact.deleteMany({ _id: { $in: duplicateIds } });
+    }
 
     res.status(200).json({
       success: true,
-      count: contacts.length,
-      data: contacts,
+      count: paginatedContacts.length,
+      data: paginatedContacts,
       pagination: {
-        total,
+        total: totalUnique, // ✅ अब ये सही count है
         page: pageNum,
         limit: limitNum,
-        pages: Math.ceil(total / limitNum),
-        hasMore: pageNum * limitNum < total,
+        pages: Math.ceil(totalUnique / limitNum),
+        hasMore: endIndex < totalUnique,
+      },
+      // 🟢 Optional: Send duplicate info for debugging
+      debug: {
+        duplicatesRemoved: duplicateIds.length,
+        originalCount: allContacts.length,
       },
     });
   } catch (error) {

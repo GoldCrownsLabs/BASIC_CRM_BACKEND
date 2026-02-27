@@ -5,6 +5,32 @@ const { Expo } = require("expo-server-sdk");
 
 const expo = new Expo();
 
+// ======================== HELPER FUNCTIONS ========================
+
+/**
+ * Get contact full name from firstName and lastName
+ */
+const getContactFullName = (contact) => {
+  if (!contact) return "Unknown Contact";
+
+  const firstName = contact.firstName || contact.first_name || "";
+  const lastName = contact.lastName || contact.last_name || "";
+
+  return [firstName, lastName].filter(Boolean).join(" ").trim() || "Contact";
+};
+
+/**
+ * Get lead full name from firstName and lastName
+ */
+const getLeadFullName = (lead) => {
+  if (!lead) return "Unknown Lead";
+
+  const firstName = lead.firstName || lead.first_name || "";
+  const lastName = lead.lastName || lead.last_name || "";
+
+  return [firstName, lastName].filter(Boolean).join(" ").trim() || "Lead";
+};
+
 class NotificationService {
   // ======================== CORE METHODS ========================
 
@@ -397,18 +423,25 @@ class NotificationService {
 
       if (!creator) return [];
 
+      // ✅ FIX: Get lead full name
+      const leadName = getLeadFullName(lead);
+
       // 1. Notify creator
       if (creator.shouldReceiveNotification("lead")) {
         notifications.push({
           userId: createdBy,
-          title: "Lead Created",
-          message: `New lead "${lead.name}" has been added`,
+          title: `New Lead: ${leadName}`,
+          message: `Lead "${leadName}" has been created successfully`,
           type: "lead",
           data: {
             leadId: lead._id,
+            leadName: leadName,
             action: "created",
             source: lead.source,
             status: lead.status,
+            email: lead.email,
+            phone: lead.phone,
+            company: lead.company,
           },
         });
       }
@@ -423,11 +456,12 @@ class NotificationService {
         ) {
           notifications.push({
             userId: lead.assignedTo,
-            title: "New Lead Assigned",
-            message: `Lead "${lead.name}" assigned to you`,
+            title: `New Lead Assigned: ${leadName}`,
+            message: `Lead "${leadName}" has been assigned to you`,
             type: "lead",
             data: {
               leadId: lead._id,
+              leadName: leadName,
               action: "assigned",
               assignedBy: createdBy,
               leadValue: lead.value,
@@ -447,11 +481,12 @@ class NotificationService {
         if (manager.shouldReceiveNotification("lead")) {
           notifications.push({
             userId: manager._id,
-            title: "New Lead Added",
-            message: `New lead "${lead.name}" added to system`,
+            title: `New Lead in System: ${leadName}`,
+            message: `${creator.name} added new lead "${leadName}" from ${lead.company || "Unknown"}`,
             type: "lead",
             data: {
               leadId: lead._id,
+              leadName: leadName,
               action: "manager_notify",
               createdBy: createdBy,
               creatorName: creator?.name,
@@ -477,18 +512,47 @@ class NotificationService {
 
       if (!changer) return [];
 
+      // ✅ FIX: Get lead full name
+      const leadName = getLeadFullName(lead);
+
       // Notify assigned sales person
       if (lead.assignedTo) {
         const assignedUser = await User.findById(lead.assignedTo);
         if (assignedUser && assignedUser.shouldReceiveNotification("lead")) {
           notifications.push({
             userId: lead.assignedTo,
-            title: "Lead Status Updated",
-            message: `Lead "${lead.name}" status changed from ${oldStatus} to ${newStatus}`,
+            title: `Lead Status Updated: ${leadName}`,
+            message: `Lead "${leadName}" status changed from ${oldStatus} to ${newStatus}`,
             type: "lead",
             data: {
               leadId: lead._id,
+              leadName: leadName,
               action: "status_changed",
+              oldStatus: oldStatus,
+              newStatus: newStatus,
+              changedBy: changedBy,
+              changerName: changer.name,
+            },
+          });
+        }
+      }
+
+      // Also notify the creator if different from assigned person
+      if (
+        lead.createdBy &&
+        lead.createdBy.toString() !== lead.assignedTo?.toString()
+      ) {
+        const creator = await User.findById(lead.createdBy);
+        if (creator && creator.shouldReceiveNotification("lead")) {
+          notifications.push({
+            userId: lead.createdBy,
+            title: `Lead Status Updated: ${leadName}`,
+            message: `Lead "${leadName}" status changed from ${oldStatus} to ${newStatus} by ${changer.name}`,
+            type: "lead",
+            data: {
+              leadId: lead._id,
+              leadName: leadName,
+              action: "status_changed_creator",
               oldStatus: oldStatus,
               newStatus: newStatus,
               changedBy: changedBy,
@@ -517,15 +581,19 @@ class NotificationService {
 
       if (!creator) return [];
 
+      // ✅ FIX: Get contact full name
+      const contactName = getContactFullName(contact);
+
       // 1. Creator ko notification
       if (creator.shouldReceiveNotification("contact")) {
         notifications.push({
           userId: createdBy,
           title: "Contact Added",
-          message: `New contact "${contact.name}" has been added successfully`,
+          message: `New contact "${contactName}" has been added successfully`,
           type: "contact",
           data: {
             contactId: contact._id,
+            contactName: contactName,
             action: "created",
             email: contact.email,
             phone: contact.phone,
@@ -547,10 +615,11 @@ class NotificationService {
             notifications.push({
               userId: member._id,
               title: "New Team Contact",
-              message: `${creator.name} added contact: "${contact.name}"`,
+              message: `${creator.name} added contact: "${contactName}"`,
               type: "contact",
               data: {
                 contactId: contact._id,
+                contactName: contactName,
                 action: "team_contact",
                 addedBy: createdBy,
                 addedByName: creator.name,
@@ -568,10 +637,11 @@ class NotificationService {
           notifications.push({
             userId: manager._id,
             title: "Team Contact Added",
-            message: `${creator.name} added new contact: "${contact.name}" from ${contact.company || "Unknown"}`,
+            message: `${creator.name} added new contact: "${contactName}" from ${contact.company || "Unknown"}`,
             type: "contact",
             data: {
               contactId: contact._id,
+              contactName: contactName,
               action: "manager_notify",
               addedBy: createdBy,
               creatorName: creator.name,
@@ -593,10 +663,11 @@ class NotificationService {
             notifications.push({
               userId: salesPerson._id,
               title: "New Lead from Contact",
-              message: `Contact "${contact.name}" can be converted to lead`,
+              message: `Contact "${contactName}" can be converted to lead`,
               type: "contact",
               data: {
                 contactId: contact._id,
+                contactName: contactName,
                 action: "potential_lead",
                 addedBy: createdBy,
                 email: contact.email,

@@ -38,7 +38,7 @@ const calendarEventSchema = new mongoose.Schema(
       default: "",
     },
     duration: {
-      type: Number, // in minutes
+      type: Number,
       default: 60,
     },
     contactName: {
@@ -97,7 +97,7 @@ const calendarEventSchema = new mongoose.Schema(
     recurringEndDate: Date,
     reminders: [
       {
-        type: Number, // minutes before
+        type: Number,
         default: [15, 30, 60],
       },
     ],
@@ -132,7 +132,7 @@ const calendarEventSchema = new mongoose.Schema(
   },
 );
 
-// Indexes for performance
+// Indexes
 calendarEventSchema.index({ date: 1, assignedTo: 1 });
 calendarEventSchema.index({ assignedTo: 1, status: 1 });
 calendarEventSchema.index({ contactId: 1 });
@@ -144,17 +144,28 @@ calendarEventSchema.virtual("formattedDate").get(function () {
   return this.date.toISOString().split("T")[0];
 });
 
-// Pre-save middleware
+// 🔥 FIXED: Pre-save middleware with safe next() handling
 calendarEventSchema.pre("save", function (next) {
-  if (!this.endTime && this.startTime && this.duration) {
-    const [hours, minutes] = this.startTime.split(":").map(Number);
-    const endMinutes = hours * 60 + minutes + this.duration;
-    const endHours = Math.floor(endMinutes / 60);
-    const endMins = endMinutes % 60;
-    this.endTime = `${endHours.toString().padStart(2, "0")}:${endMins.toString().padStart(2, "0")}`;
+  try {
+    if (!this.endTime && this.startTime && this.duration) {
+      const [hours, minutes] = this.startTime.split(":").map(Number);
+      const endMinutes = hours * 60 + minutes + this.duration;
+      const endHours = Math.floor(endMinutes / 60);
+      const endMins = endMinutes % 60;
+      this.endTime = `${endHours.toString().padStart(2, "0")}:${endMins.toString().padStart(2, "0")}`;
+    }
+    this.metadata.lastUpdated = new Date();
+
+    if (typeof next === "function") {
+      return next();
+    }
+    // If next is not a function, just continue silently
+  } catch (error) {
+    console.error("❌ CalendarEvent pre-save error:", error);
+    if (typeof next === "function") {
+      return next(error);
+    }
   }
-  this.metadata.lastUpdated = new Date();
-  next();
 });
 
 module.exports = mongoose.model("CalendarEvent", calendarEventSchema);

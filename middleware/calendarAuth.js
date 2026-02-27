@@ -1,13 +1,13 @@
 const CalendarEvent = require("../models/CalendarEvent");
 
 const calendarAuth = {
-  // ✅ Check if event belongs to user
+  // ✅ Fixed: return with response
   checkEventOwnership: async (req, res, next) => {
     try {
       const eventId = req.params.id || req.params.eventId;
 
       if (!eventId) {
-        return next(); // No event ID, continue
+        return next();
       }
 
       const event = await CalendarEvent.findOne({
@@ -22,18 +22,19 @@ const calendarAuth = {
         });
       }
 
-      req.event = event; // Attach event to request for later use
+      req.event = event;
       next();
     } catch (error) {
       console.error("Event ownership check error:", error);
-      res.status(500).json({
+      return res.status(500).json({
+        // ← FIXED: return added
         success: false,
         message: "Error checking event ownership",
       });
     }
   },
 
-  // ✅ Optional: Check if user can modify event
+  // ✅ Fixed all other functions similarly
   checkCanModify: async (req, res, next) => {
     try {
       const event = req.event || (await CalendarEvent.findById(req.params.id));
@@ -45,7 +46,6 @@ const calendarAuth = {
         });
       }
 
-      // Only creator or assigned user can modify
       if (
         event.createdBy.toString() !== req.user._id.toString() &&
         event.assignedTo.toString() !== req.user._id.toString()
@@ -59,42 +59,52 @@ const calendarAuth = {
       next();
     } catch (error) {
       console.error("Modify permission error:", error);
-      res.status(500).json({
+      return res.status(500).json({
+        // ← FIXED
         success: false,
         message: "Error checking permissions",
       });
     }
   },
 
-  // ✅ Validate date params
+  // ✅ Fixed validateDateParams
   validateDateParams: (req, res, next) => {
-    const { year, month, date } = req.params;
+    try {
+      const { year, month, date } = req.params;
 
-    if (year && (isNaN(year) || year < 2000 || year > 2100)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid year parameter",
-      });
-    }
-
-    if (month && (isNaN(month) || month < 0 || month > 11)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid month parameter (0-11)",
-      });
-    }
-
-    if (date) {
-      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-      if (!dateRegex.test(date)) {
+      if (year && (isNaN(year) || year < 2000 || year > 2100)) {
         return res.status(400).json({
           success: false,
-          message: "Invalid date format. Use YYYY-MM-DD",
+          message: "Invalid year parameter",
         });
       }
-    }
 
-    next();
+      if (month && (isNaN(month) || month < 0 || month > 11)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid month parameter (0-11)",
+        });
+      }
+
+      if (date) {
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        if (!dateRegex.test(date)) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid date format. Use YYYY-MM-DD",
+          });
+        }
+      }
+
+      next();
+    } catch (error) {
+      console.error("Date validation error:", error);
+      return res.status(500).json({
+        // ← FIXED
+        success: false,
+        message: "Error validating date parameters",
+      });
+    }
   },
 };
 

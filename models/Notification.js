@@ -21,10 +21,11 @@ const notificationSchema = new mongoose.Schema(
     type: {
       type: String,
       enum: [
-        "calendar", // ADD THIS - Calendar specific notifications
-        "calendar_reminder", // ADD THIS - Event reminders
-        "calendar_invite", // ADD THIS - Event invites
-        "calendar_update", // ADD THIS - Event updates
+        "calendar",
+        "calendar_reminder",
+        "calendar_invite",
+        "calendar_update",
+        "contact",
         "task",
         "lead",
         "project",
@@ -185,6 +186,7 @@ notificationSchema.virtual("formattedTime").get(function () {
 });
 
 // Pre-save middleware to set category based on type
+
 notificationSchema.pre("save", function (next) {
   if (!this.category) {
     const typeToCategory = {
@@ -192,6 +194,7 @@ notificationSchema.pre("save", function (next) {
       calendar_reminder: "calendar",
       calendar_invite: "calendar",
       calendar_update: "calendar",
+      contact: "communication", // <-- ADD THIS
       task: "tasks",
       reminder: "tasks",
       lead: "leads",
@@ -214,6 +217,7 @@ notificationSchema.pre("save", function (next) {
       calendar_reminder: { icon: "bell", color: "#EF4444" },
       calendar_invite: { icon: "user-plus", color: "#8B5CF6" },
       calendar_update: { icon: "edit", color: "#F59E0B" },
+      contact: { icon: "user", color: "#10B981" }, // <-- ADD THIS
       task: { icon: "check-circle", color: "#10B981" },
       reminder: { icon: "clock", color: "#F59E0B" },
       lead: { icon: "user", color: "#8B5CF6" },
