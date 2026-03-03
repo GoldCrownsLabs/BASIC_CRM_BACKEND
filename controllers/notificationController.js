@@ -1,36 +1,44 @@
 // controllers/notificationController.js
-const NotificationService = require("../services/notificationService");
+
+// ❌ PURANA HATAO
+// const NotificationService = require("../services/notificationService");
+
+// ✅ NAYA LAGAO
+const Notification = require("../services/notifications");
+
 const User = require("../models/User");
-const Notification = require("../models/Notification");
+const NotificationModel = require("../models/Notification"); // Renamed to avoid conflict
 
 exports.getNotifications = async (req, res) => {
   try {
-    console.log('🔍 DEBUG: Notification request from user:', req.user?._id);
-    
+    console.log("🔍 DEBUG: Notification request from user:", req.user?._id);
+
     if (!req.user || !req.user._id) {
-      console.error('❌ ERROR: User not authenticated in notification controller');
+      console.error(
+        "❌ ERROR: User not authenticated in notification controller",
+      );
       return res.status(401).json({
         success: false,
         error: "User not authenticated",
-        debug: "Check if protect middleware is working"
+        debug: "Check if protect middleware is working",
       });
     }
 
     const { page = 1, limit = 20, unread, type } = req.query;
-    const skip = (page - 1) * limit;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const result = await NotificationService.getUserNotifications(
-      req.user._id,
-      {
-        limit: parseInt(limit),
-        skip,
-        unreadOnly: unread === "true",
-        type: type || undefined,
-      },
+    // ✅ Use new notification service
+    const result = await Notification.core.getUserNotifications(req.user._id, {
+      limit: parseInt(limit),
+      skip,
+      unreadOnly: unread === "true",
+      type: type || undefined,
+    });
+
+    console.log(
+      `✅ Fetched ${result.notifications?.length || 0} notifications for user ${req.user._id}`,
     );
 
-    console.log(`✅ Fetched ${result.notifications?.length || 0} notifications for user ${req.user._id}`);
-    
     res.json({
       success: true,
       ...result,
@@ -47,7 +55,8 @@ exports.getNotifications = async (req, res) => {
 // Mark notification as read
 exports.markAsRead = async (req, res) => {
   try {
-    const notification = await NotificationService.markAsRead(
+    // ✅ Use new notification service
+    const notification = await Notification.core.markAsRead(
       req.params.id,
       req.user._id,
     );
@@ -75,7 +84,8 @@ exports.markAsRead = async (req, res) => {
 // Mark all as read
 exports.markAllAsRead = async (req, res) => {
   try {
-    await NotificationService.markAllAsRead(req.user._id);
+    // ✅ Use new notification service
+    await Notification.core.markAllAsRead(req.user._id);
 
     res.json({
       success: true,
@@ -90,10 +100,11 @@ exports.markAllAsRead = async (req, res) => {
   }
 };
 
-// Delete notification - UPDATED to use Service
+// Delete notification
 exports.deleteNotification = async (req, res) => {
   try {
-    const notification = await NotificationService.deleteNotification(
+    // ✅ Use new notification service
+    const notification = await Notification.core.delete(
       req.params.id,
       req.user._id,
     );
@@ -200,7 +211,8 @@ exports.updateNotificationSettings = async (req, res) => {
 // Test notification
 exports.sendTestNotification = async (req, res) => {
   try {
-    const notification = await NotificationService.createNotification({
+    // ✅ Use new notification service
+    const notification = await Notification.core.create({
       userId: req.user._id,
       title: "Test Notification",
       message: "This is a test notification from the server",
@@ -222,11 +234,16 @@ exports.sendTestNotification = async (req, res) => {
   }
 };
 
-// NEW METHODS TO ADD
+// Get notification statistics
 exports.getNotificationStats = async (req, res) => {
   try {
-    const stats = await NotificationService.getNotificationStats(req.user._id);
-    res.json({ success: true, stats });
+    // ✅ Use new notification service
+    const stats = await Notification.core.getStats(req.user._id);
+
+    res.json({
+      success: true,
+      stats,
+    });
   } catch (error) {
     console.error("Get stats error:", error);
     res.status(500).json({
@@ -236,12 +253,14 @@ exports.getNotificationStats = async (req, res) => {
   }
 };
 
+// Clear all notifications
 exports.clearAllNotifications = async (req, res) => {
   try {
-    await Notification.deleteMany({ userId: req.user._id });
-    await User.findByIdAndUpdate(req.user._id, {
-      notificationBadgeCount: 0,
-    });
+    // Delete all notifications for user
+    await NotificationModel.deleteMany({ userId: req.user._id });
+
+    // Update badge count
+    await Notification.core.updateBadgeCount(req.user._id);
 
     res.json({
       success: true,
@@ -259,7 +278,8 @@ exports.clearAllNotifications = async (req, res) => {
 // Get notification by ID
 exports.getNotificationById = async (req, res) => {
   try {
-    const notification = await Notification.findOne({
+    // ✅ Use NotificationModel directly (not service)
+    const notification = await NotificationModel.findOne({
       _id: req.params.id,
       userId: req.user._id,
     });
@@ -283,6 +303,60 @@ exports.getNotificationById = async (req, res) => {
     res.status(500).json({
       success: false,
       error: "Failed to fetch notification",
+    });
+  }
+};
+
+// Get unread count
+exports.getUnreadCount = async (req, res) => {
+  try {
+    // ✅ Use new notification service
+    const count = await Notification.core.getBadgeCount(req.user._id);
+
+    res.json({
+      success: true,
+      unreadCount: count,
+    });
+  } catch (error) {
+    console.error("Get unread count error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get unread count",
+    });
+  }
+};
+
+// Bulk delete notifications
+exports.bulkDeleteNotifications = async (req, res) => {
+  try {
+    const { notificationIds } = req.body;
+
+    if (!notificationIds || !Array.isArray(notificationIds)) {
+      return res.status(400).json({
+        success: false,
+        error: "Notification IDs array is required",
+      });
+    }
+
+    // Delete only user's own notifications
+    const result = await NotificationModel.deleteMany({
+      _id: { $in: notificationIds },
+      userId: req.user._id,
+    });
+
+    // Update badge count
+    await Notification.core.updateBadgeCount(req.user._id);
+
+    res.json({
+      success: true,
+      message: `${result.deletedCount} notifications deleted`,
+      deletedCount: result.deletedCount,
+    });
+  } catch (error) {
+    console.error("Bulk delete error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to delete notifications",
     });
   }
 };

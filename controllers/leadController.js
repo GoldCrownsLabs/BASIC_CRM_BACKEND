@@ -1,7 +1,9 @@
+// controllers/leadController.js
+
 const Lead = require("../models/Lead");
 const User = require("../models/User");
-const NotificationService = require("../services/notificationService");
-const mongoose = require("mongoose"); // ✅ Add this
+const Notification = require("../services/notifications");
+const mongoose = require("mongoose");
 
 // @desc    Create a new lead
 // @route   POST /api/leads
@@ -43,7 +45,7 @@ exports.createLead = async (req, res) => {
     // Check for existing lead (only among user's leads)
     const existingLead = await Lead.findOne({
       email,
-      createdBy: req.user.id, // 👈 ADDED
+      createdBy: req.user.id,
     });
 
     if (existingLead) {
@@ -73,14 +75,15 @@ exports.createLead = async (req, res) => {
 
     await lead.save();
 
-    // 🔥 BACKGROUND NOTIFICATION
+    // ✅ Send notification using lead module
     setImmediate(() => {
-      NotificationService.notifyLeadCreated(lead, req.user.id)
+      Notification.lead
+        .notifyLeadCreated(lead, req.user.id)
         .then(() => {
           console.log(`📨 Lead notification sent: ${lead._id}`);
         })
-        .catch(() => {
-          // Silent fail
+        .catch((err) => {
+          console.error("Lead notification error:", err);
         });
     });
 
@@ -115,7 +118,7 @@ exports.createLead = async (req, res) => {
   }
 };
 
-// @desc    Get all leads with pagination - ✅ FIXED
+// @desc    Get all leads with pagination
 // @route   GET /api/leads
 // @access  Private
 exports.getLeads = async (req, res) => {
@@ -134,7 +137,7 @@ exports.getLeads = async (req, res) => {
       endDate,
     } = req.query;
 
-    // ✅ FIXED: Always filter by current user
+    // Always filter by current user
     const filter = {
       createdBy: req.user.id,
     };
@@ -207,12 +210,12 @@ exports.getLeads = async (req, res) => {
   }
 };
 
-// @desc    Get single lead by ID - ✅ FIXED
+// @desc    Get single lead by ID
 // @route   GET /api/leads/:id
 // @access  Private
 exports.getLeadById = async (req, res) => {
   try {
-    // ✅ FIXED: Check ownership
+    // Check ownership
     const lead = await Lead.findOne({
       _id: req.params.id,
       createdBy: req.user.id,
@@ -249,12 +252,12 @@ exports.getLeadById = async (req, res) => {
   }
 };
 
-// @desc    Update lead - ✅ FIXED
+// @desc    Update lead
 // @route   PUT /api/leads/:id
 // @access  Private
 exports.updateLead = async (req, res) => {
   try {
-    // ✅ FIXED: Check ownership
+    // Check ownership
     const lead = await Lead.findOne({
       _id: req.params.id,
       createdBy: req.user.id,
@@ -292,16 +295,18 @@ exports.updateLead = async (req, res) => {
       runValidators: true,
     }).populate("assignedTo", "name email");
 
-    // 🔥 BACKGROUND NOTIFICATIONS
+    // ✅ Send notifications using lead module
     setImmediate(() => {
       // Status change notification
       if (req.body.status && oldStatus !== req.body.status) {
-        NotificationService.notifyLeadStatusChanged(
-          updatedLead,
-          oldStatus,
-          req.body.status,
-          req.user.id,
-        ).catch(() => {});
+        Notification.lead
+          .notifyLeadStatusChanged(
+            updatedLead,
+            oldStatus,
+            req.body.status,
+            req.user.id,
+          )
+          .catch((err) => console.error("Status notification error:", err));
       }
 
       // Assignment change notification
@@ -309,9 +314,9 @@ exports.updateLead = async (req, res) => {
         req.body.assignedTo &&
         oldAssignedTo?.toString() !== req.body.assignedTo.toString()
       ) {
-        NotificationService.notifyLeadCreated(updatedLead, req.user.id).catch(
-          () => {},
-        );
+        Notification.lead
+          .notifyLeadAssigned(updatedLead, req.user.id)
+          .catch((err) => console.error("Assignment notification error:", err));
       }
     });
 
@@ -337,12 +342,12 @@ exports.updateLead = async (req, res) => {
   }
 };
 
-// @desc    Delete lead - ✅ FIXED
+// @desc    Delete lead
 // @route   DELETE /api/leads/:id
 // @access  Private
 exports.deleteLead = async (req, res) => {
   try {
-    // ✅ FIXED: Check ownership and delete in one go
+    // Check ownership and delete in one go
     const lead = await Lead.findOneAndDelete({
       _id: req.params.id,
       createdBy: req.user.id,
@@ -376,7 +381,7 @@ exports.deleteLead = async (req, res) => {
   }
 };
 
-// @desc    Add note to lead - ✅ FIXED
+// @desc    Add note to lead
 // @route   POST /api/leads/:id/notes
 // @access  Private
 exports.addNote = async (req, res) => {
@@ -390,7 +395,7 @@ exports.addNote = async (req, res) => {
       });
     }
 
-    // ✅ FIXED: Check ownership
+    // Check ownership
     const lead = await Lead.findOne({
       _id: req.params.id,
       createdBy: req.user.id,
@@ -412,19 +417,21 @@ exports.addNote = async (req, res) => {
 
     await lead.save();
 
-    // 🔥 BACKGROUND NOTIFICATION - Only if assigned to someone else
+    // ✅ Send note notification using system module
     if (lead.assignedTo && lead.assignedTo.toString() !== req.user.id) {
       setImmediate(() => {
-        NotificationService.sendSystemNotification(
-          lead.assignedTo,
-          "New Note Added",
-          `A new note has been added to lead: ${lead.firstName} ${lead.lastName}`,
-          {
-            leadId: lead._id,
-            noteContent:
-              content.substring(0, 50) + (content.length > 50 ? "..." : ""),
-          },
-        ).catch(() => {});
+        Notification.system
+          .sendToUser(
+            lead.assignedTo,
+            "📝 New Note Added",
+            `A new note has been added to lead: ${lead.firstName} ${lead.lastName}`,
+            {
+              leadId: lead._id,
+              noteContent:
+                content.substring(0, 50) + (content.length > 50 ? "..." : ""),
+            },
+          )
+          .catch((err) => console.error("Note notification error:", err));
       });
     }
 
@@ -453,7 +460,7 @@ exports.addNote = async (req, res) => {
   }
 };
 
-// @desc    Update lead status - ✅ FIXED
+// @desc    Update lead status
 // @route   PATCH /api/leads/:id/status
 // @access  Private
 exports.updateLeadStatus = async (req, res) => {
@@ -467,7 +474,7 @@ exports.updateLeadStatus = async (req, res) => {
       });
     }
 
-    // ✅ FIXED: Check ownership
+    // Check ownership
     const lead = await Lead.findOne({
       _id: req.params.id,
       createdBy: req.user.id,
@@ -484,14 +491,11 @@ exports.updateLeadStatus = async (req, res) => {
     lead.status = status;
     await lead.save();
 
-    // 🔥 BACKGROUND NOTIFICATION
+    // ✅ Send status change notification using lead module
     setImmediate(() => {
-      NotificationService.notifyLeadStatusChanged(
-        lead,
-        oldStatus,
-        status,
-        req.user.id,
-      ).catch(() => {});
+      Notification.lead
+        .notifyLeadStatusChanged(lead, oldStatus, status, req.user.id)
+        .catch((err) => console.error("Status notification error:", err));
     });
 
     res.json({
@@ -516,7 +520,7 @@ exports.updateLeadStatus = async (req, res) => {
   }
 };
 
-// @desc    Get leads assigned to current user - ✅ GOOD
+// @desc    Get leads assigned to current user
 // @route   GET /api/leads/assigned/me
 // @access  Private
 exports.getMyLeads = async (req, res) => {
@@ -538,12 +542,12 @@ exports.getMyLeads = async (req, res) => {
   }
 };
 
-// @desc    Get lead statistics - ✅ FIXED
+// @desc    Get lead statistics
 // @route   GET /api/leads/summary/stats
 // @access  Private
 exports.getLeadStats = async (req, res) => {
   try {
-    // ✅ FIXED: Only count user's leads
+    // Only count user's leads
     const stats = await Lead.aggregate([
       {
         $match: {
@@ -580,7 +584,7 @@ exports.getLeadStats = async (req, res) => {
   }
 };
 
-// @desc    Bulk update leads - ✅ FIXED
+// @desc    Bulk update leads
 // @route   PUT /api/leads/bulk-update
 // @access  Private
 exports.bulkUpdateLeads = async (req, res) => {
@@ -611,7 +615,7 @@ exports.bulkUpdateLeads = async (req, res) => {
       });
     }
 
-    // ✅ FIXED: Only update user's own leads
+    // Only update user's own leads
     const result = await Lead.updateMany(
       {
         _id: { $in: leadIds },

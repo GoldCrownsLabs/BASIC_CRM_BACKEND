@@ -5,7 +5,8 @@ const CoreNotification = require("./coreNotification");
 const BaseNotification = require("./baseNotification");
 
 /**
- * Contact & Lead Notification Module
+ * Contact Notification Module ONLY
+ * (Lead methods moved to leadNotification.js)
  */
 class ContactNotification extends BaseNotification {
   /**
@@ -66,7 +67,7 @@ class ContactNotification extends BaseNotification {
         }
       }
 
-      // 3. Hot lead alert
+      // 3. Hot lead alert (if contact becomes hot lead)
       if (contact.leadStatus === "hot") {
         const salesTeam = await User.find({
           department: "sales",
@@ -79,7 +80,7 @@ class ContactNotification extends BaseNotification {
             userId: salesPerson._id,
             title: "🔥 Hot Lead Alert!",
             message: `${creator.name} added a HOT lead: "${contactName}"`,
-            type: "lead",
+            type: "contact", // Changed from "lead" to "contact"
             data: {
               contactId: contact._id,
               contactName,
@@ -253,50 +254,6 @@ class ContactNotification extends BaseNotification {
     } catch (error) {
       console.error(
         "❌ ContactNotification.notifyContactCompleted error:",
-        error,
-      );
-      throw error;
-    }
-  }
-
-  /**
-   * Notify when lead status changes
-   */
-  static async notifyLeadStatusChanged(lead, oldStatus, newStatus, changedBy) {
-    try {
-      const notifications = [];
-      const changer = await User.findById(changedBy);
-      if (!changer) return [];
-
-      const leadName = this.getLeadFullName(lead);
-      const fromEmoji = this.getStatusEmoji(oldStatus);
-      const toEmoji = this.getStatusEmoji(newStatus);
-
-      // Notify assigned person
-      if (lead.assignedTo) {
-        notifications.push({
-          userId: lead.assignedTo,
-          title: `Lead Status Updated: ${leadName}`,
-          message: `Lead status changed from ${fromEmoji} ${oldStatus} to ${toEmoji} ${newStatus}`,
-          type: "lead",
-          data: {
-            leadId: lead._id,
-            leadName,
-            action: "status_changed",
-            oldStatus,
-            newStatus,
-            changedBy,
-            changerName: changer.name,
-          },
-        });
-      }
-
-      return notifications.length
-        ? await CoreNotification.createBulk(notifications)
-        : [];
-    } catch (error) {
-      console.error(
-        "❌ ContactNotification.notifyLeadStatusChanged error:",
         error,
       );
       throw error;

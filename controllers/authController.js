@@ -1,7 +1,9 @@
+// controllers/authController.js
+
 const User = require("../models/User");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
-const NotificationService = require("../services/notificationService"); // ✅ Import
+const Notification = require("../services/notifications");
 
 // ========================
 // HELPER FUNCTIONS
@@ -129,14 +131,15 @@ exports.register = async (req, res) => {
 
     const user = await User.create(userData);
 
-    // 🔥 BACKGROUND NOTIFICATION - Self Registration
+    // ✅ FIX: Self Registration Notification
     setImmediate(() => {
-      NotificationService.notifyProfileCreated(user, null) 
+      Notification.profile
+        .notifyProfileCreated(user, null)
         .then(() => {
           console.log(`📨 Welcome notification sent to: ${user._id}`);
         })
-        .catch(() => {
-          // Silent fail - user ko kuch nahi dikhana
+        .catch((err) => {
+          console.error("Profile notification error:", err);
         });
     });
 
@@ -286,6 +289,9 @@ exports.updateProfile = async (req, res) => {
       });
     }
 
+    // ✅ FIX: Profile update notification (self update - no notification needed)
+    // Self update ke liye notification nahi bhejte
+
     res.json({
       success: true,
       message: "Profile updated successfully",
@@ -353,6 +359,18 @@ exports.changePassword = async (req, res) => {
     user.password = hashedPassword;
     await user.save();
 
+    // ✅ FIX: Password change notification
+    setImmediate(() => {
+      Notification.system
+        .sendToUser(
+          user._id,
+          "🔒 Password Changed",
+          "Your password has been updated successfully",
+          { action: "password_changed" },
+        )
+        .catch((err) => console.error("Password notification error:", err));
+    });
+
     res.json({
       success: true,
       message: "Password changed successfully",
@@ -379,6 +397,9 @@ exports.deleteAccount = async (req, res) => {
         error: "User not found",
       });
     }
+
+    // ✅ FIX: Account deletion notification (optional - email could be sent here)
+    // No notification needed as account is deleted
 
     res.json({
       success: true,
@@ -647,7 +668,7 @@ exports.setDefaultAddress = async (req, res) => {
 // ADMIN CONTROLLERS
 // ========================
 
-// @desc    Create user (Admin only) - NEW METHOD
+// @desc    Create user (Admin only)
 // @route   POST /api/auth/users
 // @access  Private/Admin
 exports.createUser = async (req, res) => {
@@ -696,14 +717,15 @@ exports.createUser = async (req, res) => {
 
     const user = await User.create(userData);
 
-    // 🔥 BACKGROUND NOTIFICATION - Admin created user
+    // ✅ FIX: Admin created user notification
     setImmediate(() => {
-      NotificationService.notifyProfileCreated(user, req.user.id) // req.user.id = admin
+      Notification.profile
+        .notifyProfileCreated(user, req.user.id)
         .then(() => {
           console.log(`📨 Profile notification sent for user: ${user._id}`);
         })
-        .catch(() => {
-          // Silent fail
+        .catch((err) => {
+          console.error("Profile notification error:", err);
         });
     });
 
@@ -789,7 +811,7 @@ exports.updateUser = async (req, res) => {
       { new: true, runValidators: true },
     ).select("-password");
 
-    // 🔥 BACKGROUND NOTIFICATION - Profile updated by admin
+    // ✅ FIX: Profile updated by admin notification
     setImmediate(() => {
       // Track what changed
       const changes = {};
@@ -804,11 +826,15 @@ exports.updateUser = async (req, res) => {
 
       // Only send notification if there are actual changes
       if (Object.keys(changes).length > 0) {
-        NotificationService.notifyProfileUpdated(
-          userId,
-          req.user.id, // admin who updated
-          changes,
-        ).catch(() => {});
+        Notification.profile
+          .notifyProfileUpdated(
+            userId,
+            req.user.id, // admin who updated
+            changes,
+          )
+          .catch((err) =>
+            console.error("Profile update notification error:", err),
+          );
       }
     });
 
@@ -898,24 +924,28 @@ exports.toggleActiveStatus = async (req, res) => {
     user.isActive = !user.isActive;
     await user.save();
 
-    // 🔥 BACKGROUND NOTIFICATION - Account status changed
+    // ✅ FIX: Account status changed notification
     setImmediate(() => {
       if (!user.isActive) {
         // Account deactivated
-        NotificationService.sendSystemNotification(
-          userId,
-          "Account Deactivated",
-          "Your account has been deactivated by admin. Please contact support.",
-          { action: "deactivated", by: req.user.id },
-        ).catch(() => {});
+        Notification.system
+          .sendToUser(
+            userId,
+            "⚠️ Account Deactivated",
+            "Your account has been deactivated by admin. Please contact support.",
+            { action: "deactivated", by: req.user.id },
+          )
+          .catch(() => {});
       } else {
         // Account activated
-        NotificationService.sendSystemNotification(
-          userId,
-          "Account Activated",
-          "Your account has been reactivated. You can now login.",
-          { action: "activated", by: req.user.id },
-        ).catch(() => {});
+        Notification.system
+          .sendToUser(
+            userId,
+            "✅ Account Activated",
+            "Your account has been reactivated. You can now login.",
+            { action: "activated", by: req.user.id },
+          )
+          .catch(() => {});
       }
     });
 

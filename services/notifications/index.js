@@ -1,25 +1,25 @@
 // services/notifications/index.js
 
-
 const CoreNotification = require("./coreNotification");
 const ContactNotification = require("./contactNotification");
 const TaskNotification = require("./taskNotification");
 const ProfileNotification = require("./profileNotification");
 const PerformanceNotification = require("./performanceNotification");
 const SystemNotification = require("./systemNotification");
+const LeadNotification = require("./leadNotification");
 
 module.exports = {
-  // Core CRUD operations
+  // ==================== FEATURE MODULES ====================
   core: CoreNotification,
-
-  // Feature-specific notifications
   contact: ContactNotification,
   task: TaskNotification,
   profile: ProfileNotification,
   performance: PerformanceNotification,
   system: SystemNotification,
+  lead: LeadNotification,
 
-  // ✅ Legacy support (agar purane code mein use ho raha hai)
+  // ==================== LEGACY SUPPORT ====================
+  // Core CRUD operations (for backward compatibility)
   createNotification: CoreNotification.create.bind(CoreNotification),
   createBulkNotifications: CoreNotification.createBulk.bind(CoreNotification),
   getUserNotifications:
@@ -29,18 +29,35 @@ module.exports = {
   deleteNotification: CoreNotification.delete.bind(CoreNotification),
   getNotificationStats: CoreNotification.getStats.bind(CoreNotification),
 
-  // Contact methods (legacy)
+  // ==================== CONTACT METHODS ====================
   notifyContactCreated:
     ContactNotification.notifyContactCreated.bind(ContactNotification),
   notifyContactConnected:
     ContactNotification.notifyContactConnected.bind(ContactNotification),
   notifyContactCompleted:
     ContactNotification.notifyContactCompleted.bind(ContactNotification),
-  notifyLeadStatusChanged:
-    ContactNotification.notifyLeadStatusChanged.bind(ContactNotification),
   notifyBigDeal: ContactNotification.notifyBigDeal.bind(ContactNotification),
 
-  // Performance methods (legacy)
+  // ==================== LEAD METHODS ====================
+  notifyLeadCreated: LeadNotification.notifyLeadCreated.bind(LeadNotification),
+  notifyLeadStatusChanged:
+    LeadNotification.notifyLeadStatusChanged.bind(LeadNotification),
+  notifyLeadAssigned:
+    LeadNotification.notifyLeadAssigned.bind(LeadNotification),
+  notifyLeadConverted:
+    LeadNotification.notifyLeadConverted.bind(LeadNotification),
+  notifyLeadScoreChanged:
+    LeadNotification.notifyLeadScoreChanged.bind(LeadNotification),
+
+  // ==================== PROFILE METHODS ====================
+  notifyProfileCreated:
+    ProfileNotification.notifyProfileCreated.bind(ProfileNotification),
+  notifyProfileUpdated:
+    ProfileNotification.notifyProfileUpdated.bind(ProfileNotification),
+  notifyRoleChanged:
+    ProfileNotification.notifyRoleChanged.bind(ProfileNotification),
+
+  // ==================== PERFORMANCE METHODS ====================
   notifyPerformanceMilestone: PerformanceNotification.notifyMilestone.bind(
     PerformanceNotification,
   ),
@@ -48,7 +65,7 @@ module.exports = {
     PerformanceNotification,
   ),
 
-  // System methods (legacy)
+  // ==================== SYSTEM METHODS ====================
   sendSystemNotification:
     SystemNotification.sendToUser.bind(SystemNotification),
   broadcastSystemNotification:

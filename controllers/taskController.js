@@ -1,8 +1,12 @@
 // controllers/taskController.js
+
 const Task = require("../models/Task");
 const mongoose = require("mongoose");
-const NotificationService = require("../services/notificationService");
+// ❌ PURANA HATAO
+// const NotificationService = require("../services/notificationService");
 
+// ✅ NAYA LAGAO
+const Notification = require("../services/notifications");
 
 /**
  * Get all tasks
@@ -188,9 +192,9 @@ const createTask = async (req, res) => {
     // Create task
     const task = await Task.create(taskData);
 
-    // 🔔 SEND NOTIFICATION
+    // ✅ FIXED: Use new notification service
     try {
-      await NotificationService.notifyTaskCreated(task, req.user._id);
+      await Notification.task.notifyTaskCreated(task, req.user._id);
       console.log("✅ Notification sent for task creation");
     } catch (notificationError) {
       console.error("❌ Failed to send notification:", notificationError);
@@ -267,7 +271,8 @@ const updateTask = async (req, res) => {
       });
     }
 
-    // Store old assignedTo for comparison
+    // Store old values for comparison
+    const oldStatus = task.status;
     const oldAssignedTo = task.assignedTo || [];
 
     // Prepare update fields
@@ -329,56 +334,30 @@ const updateTask = async (req, res) => {
       runValidators: true,
     });
 
-    // 🔔 SEND NOTIFICATIONS
+    // ✅ FIXED: Use new notification service
     try {
-      // Send update notification to creator
-      await NotificationService.createNotification({
-        userId: req.user._id,
-        title: "Task Updated",
-        message: `Task "${task.title}" has been updated`,
-        type: "task",
-        data: {
-          taskId: task._id,
-          action: "updated",
-          updatedBy: req.user._id,
-        },
-      });
+      // 1. Task updated notification to creator
+      await Notification.task.notifyTaskUpdated(
+        task,
+        req.user._id,
+        updateFields,
+      );
 
-      // Notify newly assigned users
+      // 2. Notify newly assigned users
       const newlyAssigned = newAssignedTo.filter(
         (userId) => !oldAssignedTo.includes(userId.toString()),
       );
 
       for (const userId of newlyAssigned) {
-        await NotificationService.createNotification({
-          userId,
-          title: "New Task Assigned",
-          message: `You have been assigned: "${task.title}"`,
-          type: "task",
-          data: {
-            taskId: task._id,
-            action: "assigned",
-            assignedBy: req.user._id,
-          },
-        });
+        await Notification.task.notifyTaskCreated(task, req.user._id);
       }
 
-      // Notify if status changed to completed
-      if (status === "completed" && task.status === "completed") {
-        await NotificationService.createNotification({
-          userId: req.user._id,
-          title: "Task Completed",
-          message: `Task "${task.title}" has been completed`,
-          type: "task",
-          data: {
-            taskId: task._id,
-            action: "completed",
-            completedAt: new Date(),
-          },
-        });
+      // 3. Notify if task completed
+      if (status === "completed" && oldStatus !== "completed") {
+        await Notification.task.notifyTaskCompleted(task, req.user._id);
       }
 
-      console.log("✅ Notification sent for task update");
+      console.log("✅ Notifications sent for task update");
     } catch (notificationError) {
       console.error("❌ Failed to send notification:", notificationError);
     }
