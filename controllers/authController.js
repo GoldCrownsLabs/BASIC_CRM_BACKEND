@@ -131,7 +131,7 @@ exports.register = async (req, res) => {
 
     // 🔥 BACKGROUND NOTIFICATION - Self Registration
     setImmediate(() => {
-      NotificationService.notifyProfileCreated(user, null) // null = self registration
+      NotificationService.notifyProfileCreated(user, null) 
         .then(() => {
           console.log(`📨 Welcome notification sent to: ${user._id}`);
         })

@@ -26,12 +26,11 @@ const contactAuth = {
         });
       }
 
-      req.contact = contact; // Attach contact to request for later use
+      req.contact = contact; // Attach contact to request
       next();
     } catch (error) {
       console.error("Contact ownership check error:", error);
 
-      // Check for invalid ID format
       if (error.name === "CastError") {
         return res.status(400).json({
           success: false,
@@ -46,39 +45,10 @@ const contactAuth = {
     }
   },
 
-  // ✅ Optional: Check if user can modify contact (extra security)
-  checkCanModify: async (req, res, next) => {
-    try {
-      const contact = req.contact || (await Contact.findById(req.params.id));
-
-      if (!contact) {
-        return res.status(404).json({
-          success: false,
-          message: "Contact not found",
-        });
-      }
-
-      // Only the owner can modify
-      if (contact.userId.toString() !== req.user.id) {
-        return res.status(403).json({
-          success: false,
-          message: "You don't have permission to modify this contact",
-        });
-      }
-
-      next();
-    } catch (error) {
-      console.error("Modify permission error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error checking permissions",
-      });
-    }
-  },
-
-  // ✅ Validate contact data before passing to controller
+  // ✅ Validate contact data (updated with new fields)
   validateContactData: (req, res, next) => {
-    const { firstName, email, phone } = req.body;
+    const { firstName, email, phone, connected, completed, dealValue } =
+      req.body;
 
     // Basic validation
     if (req.method === "POST" && (!firstName || !firstName.trim())) {
@@ -106,6 +76,52 @@ const contactAuth = {
         return res.status(400).json({
           success: false,
           message: "Please provide a valid phone number (10-20 digits)",
+        });
+      }
+    }
+
+    // Validate connected field
+    if (connected !== undefined && typeof connected !== "boolean") {
+      return res.status(400).json({
+        success: false,
+        message: "Connected field must be a boolean value",
+      });
+    }
+
+    // Validate completed field
+    if (completed !== undefined && typeof completed !== "boolean") {
+      return res.status(400).json({
+        success: false,
+        message: "Completed field must be a boolean value",
+      });
+    }
+
+    // Validate deal value (if completed is true)
+    if (completed === true || req.body.completed === true) {
+      if (!dealValue || dealValue <= 0) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Deal value is required and must be greater than 0 for completed deals",
+        });
+      }
+
+      if (isNaN(dealValue)) {
+        return res.status(400).json({
+          success: false,
+          message: "Deal value must be a number",
+        });
+      }
+    }
+
+    // Validate lead status if provided
+    if (req.body.leadStatus) {
+      const validStatuses = ["cold", "warm", "hot", "connected", "completed"];
+      if (!validStatuses.includes(req.body.leadStatus)) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid lead status. Must be one of: " + validStatuses.join(", "),
         });
       }
     }
@@ -151,6 +167,24 @@ const contactAuth = {
         message: "Error checking duplicate email",
       });
     }
+  },
+
+  // ✅ Check if user can modify deal (additional security)
+  checkDealPermissions: (req, res, next) => {
+    const { completed, dealValue } = req.body;
+
+    // Only allow deal value modification if user has permission
+    // You can add role-based checks here
+
+    // Example: Only managers can set deal values above certain amount
+    if (dealValue && dealValue > 100000 && req.user.role !== "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "You don't have permission to set deals above 100,000",
+      });
+    }
+
+    next();
   },
 };
 

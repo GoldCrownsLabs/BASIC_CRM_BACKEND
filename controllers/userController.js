@@ -23,7 +23,7 @@ exports.createUser = async (req, res) => {
     const user = await User.create({
       name,
       email,
-      password, // 🔐 auto-hashed by pre save
+      password, 
     });
 
     res.status(201).json({

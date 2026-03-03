@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { protect } = require("../middleware/auth");
-const contactAuth = require("../middleware/contactAuth"); // ✅ Import karo
+const contactAuth = require("../middleware/contactAuth");
 const {
   getContacts,
   getContactById,
@@ -12,40 +12,41 @@ const {
   getContactStats,
   getTagStats,
   batchSyncContacts,
-  getCompanies,
-  getTags,
+  markAsConnected, // ✅ New
+  markAsCompleted, // ✅ New
+  getUserPerformance, // ✅ New
 } = require("../controllers/contactController");
 
 // ================= ROUTES =================
 
 // @route   GET /api/contacts
-// @desc    Get all contacts with pagination and filters
+// @desc    Get all contacts with filters
 // @access  Private
-// ✅ Controller already has userId filter
 router.get("/", protect, getContacts);
 
 // @route   GET /api/contacts/stats/count
-// @desc    Get contact statistics
+// @desc    Get contact statistics (updated with performance)
 // @access  Private
-// ✅ Controller already has userId filter
 router.get("/stats/count", protect, getContactStats);
 
 // @route   GET /api/contacts/stats/tags
-// @desc    Get tag statistics
+// @desc    Get tag statistics (updated with connected/completed)
 // @access  Private
-// ✅ Controller already has userId filter
 router.get("/stats/tags", protect, getTagStats);
+
+// @route   GET /api/contacts/performance
+// @desc    Get user performance report
+// @access  Private (Admin can see others)
+router.get("/performance", protect, getUserPerformance);
 
 // @route   POST /api/contacts/batch
 // @desc    Batch sync contacts
 // @access  Private
-// ✅ Controller assigns userId
 router.post("/batch", protect, batchSyncContacts);
 
 // @route   POST /api/contacts
-// @desc    Create new contact
+// @desc    Create new contact (with all fields)
 // @access  Private
-// ✅ Controller assigns userId, added validation middleware
 router.post(
   "/",
   protect,
@@ -54,18 +55,16 @@ router.post(
   createContact,
 );
 
-// ======== INDIVIDUAL CONTACT ROUTES (NEED OWNERSHIP CHECK) ========
+// ======== INDIVIDUAL CONTACT ROUTES ========
 
 // @route   GET /api/contacts/:id
 // @desc    Get single contact by ID
 // @access  Private
-// ✅ ADDED ownership check
 router.get("/:id", protect, contactAuth.checkContactOwnership, getContactById);
 
 // @route   PUT /api/contacts/:id
-// @desc    Update contact
+// @desc    Update contact (with all fields)
 // @access  Private
-// ✅ ADDED ownership check + validation
 router.put(
   "/:id",
   protect,
@@ -78,7 +77,6 @@ router.put(
 // @route   PATCH /api/contacts/:id/favorite
 // @desc    Toggle favorite status
 // @access  Private
-// ✅ ADDED ownership check
 router.patch(
   "/:id/favorite",
   protect,
@@ -86,10 +84,29 @@ router.patch(
   toggleFavorite,
 );
 
+// @route   PATCH /api/contacts/:id/connected
+// @desc    Mark contact as connected
+// @access  Private
+router.patch(
+  "/:id/connected",
+  protect,
+  contactAuth.checkContactOwnership,
+  markAsConnected,
+);
+
+// @route   PATCH /api/contacts/:id/completed
+// @desc    Mark contact as completed (with deal value)
+// @access  Private
+router.patch(
+  "/:id/completed",
+  protect,
+  contactAuth.checkContactOwnership,
+  markAsCompleted,
+);
+
 // @route   DELETE /api/contacts/:id
 // @desc    Soft delete contact
 // @access  Private
-// ✅ ADDED ownership check
 router.delete(
   "/:id",
   protect,
