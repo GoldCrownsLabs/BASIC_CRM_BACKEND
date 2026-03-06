@@ -498,6 +498,8 @@ exports.updateLeadStatus = async (req, res) => {
         .catch((err) => console.error("Status notification error:", err));
     });
 
+
+    
     res.json({
       success: true,
       message: "Lead status updated successfully",
