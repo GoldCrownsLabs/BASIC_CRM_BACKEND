@@ -595,6 +595,7 @@ exports.bulkUpdateLeads = async (req, res) => {
       return res.status(400).json({
         success: false,
         error: "Lead IDs are required",
+        
       });
     }
 
@@ -615,7 +616,7 @@ exports.bulkUpdateLeads = async (req, res) => {
       });
     }
 
-    
+
 
     // Only update user's own leads
     const result = await Lead.updateMany(
