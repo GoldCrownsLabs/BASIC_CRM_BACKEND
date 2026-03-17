@@ -125,6 +125,8 @@ const activitiesRoute = require("./routes/activities");
 const notificationRoutes = require("./routes/notifications");
 const calendarRoutes = require("./routes/calendarRoutes");
 const templateRoutes = require("./routes/templateRoutes"); // ✅ NEW: Template routes
+const paymentRoutes = require("./routes/paymentRoutes");
+const webhookRoutes = require("./routes/webhookRoutes");
 
 // ============ USE ROUTES ============
 app.use("/api/auth", authRoutes);
@@ -135,7 +137,9 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/activities", activitiesRoute);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/calendar", calendarRoutes);
-app.use("/api/templates", templateRoutes); // ✅ NEW: Template routes mounted
+app.use("/api/templates", templateRoutes); 
+app.use("/api/payments", paymentRoutes);
+app.use("/api/webhooks", webhookRoutes);
 
 // ============ TEST EMAIL ROUTE (Quick test) ============
 app.get("/test-email", async (req, res) => {
@@ -170,7 +174,7 @@ app.use((req, res) => {
       activities: "/api/activities",
       notifications: "/api/notifications",
       calendar: "/api/calendar",
-      templates: "/api/templates", // ✅ Show in available routes
+      templates: "/api/templates",
       docs: "/api-docs",
     },
   });
