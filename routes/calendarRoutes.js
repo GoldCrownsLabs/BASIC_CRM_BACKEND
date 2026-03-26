@@ -2,13 +2,14 @@ const mongoose = require("mongoose");
 const express = require("express");
 const router = express.Router();
 const { protect } = require("../middleware/auth");
-const calendarAuth = require("../middleware/calendarAuth"); // ✅ Import karo
+const calendarAuth = require("../middleware/calendarAuth"); 
 const {
   validateEvent,
   validateQuickAddEvent,
   validateEventStatus,
   validateBulkUpdate,
 } = require("../middleware/validateEvent");
+
 
 const {
   getCalendarEvents,

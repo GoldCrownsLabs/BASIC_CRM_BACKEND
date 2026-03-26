@@ -14,10 +14,15 @@ dotenv.config();
 const app = express();
 const server = http.createServer(app);
 
+// ============ SOCKET.IO SETUP ============
+// ✅ Use your existing initSocket function which creates Socket.IO and sets up handlers
 const { initSocket } = require("./socket/socket");
-const io = initSocket(server);
+const io = initSocket(server); // This creates Socket.IO and sets up all event handlers
+
+// Make io available globally
 global.io = io;
 
+// ============ MIDDLEWARE ============
 app.use(
   cors({
     origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(",") : "*",
@@ -32,6 +37,7 @@ app.use(morgan("dev"));
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
+// ============ DATABASE CONNECTION ============
 const connectDB = async () => {
   try {
     console.log("🔗 Connecting to MongoDB...");
@@ -51,6 +57,20 @@ const connectDB = async () => {
 
     console.log("✅ MongoDB Connected");
 
+    // Create indexes for chat collections
+    const Chat = require("./models/Chat");
+    try {
+      await Chat.collection.createIndex({ sessionId: 1 }, { unique: true });
+      await Chat.collection.createIndex({ userId: 1 });
+      await Chat.collection.createIndex({ status: 1 });
+      await Chat.collection.createIndex({ assignedTo: 1 });
+      await Chat.collection.createIndex({ lastMessageAt: -1 });
+      await Chat.collection.createIndex({ "userInfo.email": 1 });
+      console.log("✅ Chat indexes created");
+    } catch (error) {
+      console.log("ℹ️ Chat indexes may already exist");
+    }
+
     process.on("SIGINT", async () => {
       await mongoose.connection.close();
       console.log("MongoDB connection closed");
@@ -69,6 +89,7 @@ const connectDB = async () => {
 
 connectDB();
 
+// ============ SWAGGER DOCS ============
 app.use(
   "/api-docs",
   swaggerUi.serve,
@@ -78,6 +99,7 @@ app.use(
   }),
 );
 
+// ============ HEALTH ROUTES ============
 app.get("/", (req, res) => {
   res.json({
     message: "CRM API is Running",
@@ -85,6 +107,7 @@ app.get("/", (req, res) => {
     environment: process.env.NODE_ENV || "development",
     features: {
       templates: "✅ Email templates with free testing",
+      chat: "✅ Real-time 2-way chat support",
       whatsapp: "⏳ Coming soon",
     },
   });
@@ -97,7 +120,9 @@ app.get("/health", (req, res) => {
     timestamp: new Date().toISOString(),
     database:
       mongoose.connection.readyState === 1 ? "Connected" : "Disconnected",
+    socketIO: io ? "Running" : "Not Started",
     emailService: "✅ Ethereal (Testing Mode)",
+    chatService: "✅ Real-time chat active",
   };
 
   if (mongoose.connection.readyState !== 1) {
@@ -124,9 +149,11 @@ const dashboardRoutes = require("./routes/dashboard");
 const activitiesRoute = require("./routes/activities");
 const notificationRoutes = require("./routes/notifications");
 const calendarRoutes = require("./routes/calendarRoutes");
-const templateRoutes = require("./routes/templateRoutes"); // ✅ NEW: Template routes
+const templateRoutes = require("./routes/templateRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const webhookRoutes = require("./routes/webhookRoutes");
+const supportRoutes = require("./routes/supportRoutes");
+const chatRoutes = require("./routes/chatRoutes");
 
 // ============ USE ROUTES ============
 app.use("/api/auth", authRoutes);
@@ -137,11 +164,13 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/activities", activitiesRoute);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/calendar", calendarRoutes);
-app.use("/api/templates", templateRoutes); 
+app.use("/api/templates", templateRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/webhooks", webhookRoutes);
+app.use("/api/support", supportRoutes);
+app.use("/api/chat", chatRoutes);
 
-// ============ TEST EMAIL ROUTE (Quick test) ============
+// ============ TEST EMAIL ROUTE ============
 app.get("/test-email", async (req, res) => {
   try {
     const { sendTestEmail } = require("./utils/emailService");
@@ -157,6 +186,20 @@ app.get("/test-email", async (req, res) => {
       message: error.message,
     });
   }
+});
+
+// ============ SOCKET.IO STATUS ROUTE ============
+app.get("/socket-status", (req, res) => {
+  const connectedClients = io?.engine?.clientsCount || 0;
+
+  res.json({
+    success: true,
+    data: {
+      socketIO: "running",
+      connectedClients,
+      timestamp: new Date().toISOString(),
+    },
+  });
 });
 
 // ============ 404 Handler ============
@@ -175,6 +218,8 @@ app.use((req, res) => {
       notifications: "/api/notifications",
       calendar: "/api/calendar",
       templates: "/api/templates",
+      support: "/api/support",
+      chat: "/api/chat",
       docs: "/api-docs",
     },
   });
@@ -227,19 +272,32 @@ app.use((err, req, res, next) => {
   res.status(statusCode).json(errorResponse);
 });
 
+// ============ START SERVER ============
 const PORT = process.env.PORT || 5000;
 
 server.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log("\n=================================");
+  console.log("🚀 CRM API Server Started");
+  console.log("=================================");
+  console.log(`📡 Server: http://localhost:${PORT}`);
   console.log(`📚 API Docs: http://localhost:${PORT}/api-docs`);
   console.log(`🔌 Socket.IO: ws://localhost:${PORT}`);
+  console.log(`💬 Chat Status: http://localhost:${PORT}/socket-status`);
   console.log(`📧 Email Templates: http://localhost:${PORT}/api/templates`);
-  console.log(`📧 Test Email: http://localhost:${PORT}/test-email`);
-  console.log(`✅ Email Service: Ethereal (Testing Mode - Free)`);
+  console.log(`✅ Email Service: Ethereal (Testing Mode)`);
+  console.log(`💬 Chat Service: Real-time 2-way chat active`);
+  console.log("=================================\n");
 });
 
+// ============ GRACEFUL SHUTDOWN ============
 const gracefulShutdown = (signal) => {
   console.log(`\n⚠️  Received ${signal}. Starting graceful shutdown...`);
+
+  if (io) {
+    io.close(() => {
+      console.log("✅ Socket.IO server closed");
+    });
+  }
 
   server.close(() => {
     console.log("✅ HTTP server closed");
