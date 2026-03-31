@@ -96,10 +96,22 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
     },
+    // ✅ Password is optional for Google users
     password: {
       type: String,
-      required: [true, "Please add a password"],
+      required: false,
       minlength: 6,
+    },
+    // ✅ Google authentication fields
+    googleId: {
+      type: String,
+      sparse: true,
+      unique: true,
+      index: true,
+    },
+    avatar: {
+      type: String,
+      default: "",
     },
     phone: {
       type: String,
@@ -469,33 +481,27 @@ userSchema.index({ "billingDetails.gstin": 1 });
 userSchema.index({ "subscriptionPreferences.autoRenew": 1 });
 
 // ============================================
-// ✅ FIXED VIRTUALS - WITH NULL CHECKS
+// VIRTUALS
 // ============================================
 
 userSchema.virtual("hasActiveSubscription").get(function () {
   return !!this.currentSubscription;
 });
 
-// ✅ FIXED: Added null check for trialHistory
 userSchema.virtual("isInTrial").get(function () {
   if (!this.trialHistory || !this.trialHistory.length) return false;
-  
   const lastTrial = this.trialHistory[this.trialHistory.length - 1];
   if (!lastTrial) return false;
-  
   const now = new Date();
   return (
     lastTrial.endedAt && lastTrial.endedAt > now && !lastTrial.convertedToPaid
   );
 });
 
-// ✅ FIXED: Added null check for trialHistory
 userSchema.virtual("remainingTrialDays").get(function () {
   if (!this.trialHistory || !this.trialHistory.length) return 0;
-  
   const lastTrial = this.trialHistory[this.trialHistory.length - 1];
   if (!lastTrial || !lastTrial.endedAt) return 0;
-  
   const now = new Date();
   const remaining = Math.ceil(
     (lastTrial.endedAt - now) / (1000 * 60 * 60 * 24),
@@ -508,7 +514,6 @@ userSchema.virtual("isInGracePeriod").get(function () {
   return new Date() < this.gracePeriodEndsAt;
 });
 
-// ✅ This was already safe
 userSchema.virtual("defaultPaymentMethod").get(function () {
   if (!this.paymentMethods || this.paymentMethods.length === 0) {
     return null;
@@ -587,308 +592,12 @@ userSchema.methods.updateUsage = async function (resourceType, increment = 1) {
   }
 };
 
-userSchema.methods.addToSubscriptionHistory = async function (
-  subscription,
-  plan,
-) {
-  this.subscriptionHistory.push({
-    subscription: subscription._id,
-    planName: plan.name,
-    startDate: subscription.startDate,
-    endDate: subscription.endDate,
-    status: subscription.status,
-    amount: subscription.amount,
-    razorpaySubscriptionId: subscription.razorpaySubscriptionId,
-  });
-  this.currentSubscription = subscription._id;
-  await this.save();
-};
-
-userSchema.methods.updateFeatureAccess = async function (plan) {
-  if (plan && plan.featureAccess) {
-    this.featureAccess = {
-      ...this.featureAccess,
-      ...plan.featureAccess,
-    };
-    await this.save();
-  }
-};
-
-userSchema.methods.markTrialUsed = async function (
-  planId,
-  planName,
-  startDate,
-  endDate,
-  authTxnId,
-) {
-  this.trialUsed = true;
-  this.trialEligible = false;
-  this.trialHistory.push({
-    planId,
-    planName,
-    startedAt: startDate,
-    endedAt: endDate,
-    convertedToPaid: false,
-    authTransactionId: authTxnId,
-  });
-  await this.save();
-};
-
-userSchema.methods.convertTrialToPaid = async function (subscriptionId) {
-  const lastTrial = this.trialHistory[this.trialHistory.length - 1];
-  if (lastTrial) {
-    lastTrial.convertedToPaid = true;
-  }
-  await this.save();
-};
-
-userSchema.methods.addPaymentMethod = async function (methodData) {
-  if (methodData.isDefault || this.paymentMethods.length === 0) {
-    this.paymentMethods.forEach((m) => (m.isDefault = false));
-    methodData.isDefault = true;
-  }
-  this.paymentMethods.push({
-    ...methodData,
-    addedAt: new Date(),
-  });
-  await this.save();
-  return this.paymentMethods[this.paymentMethods.length - 1];
-};
-
-userSchema.methods.removePaymentMethod = async function (methodId) {
-  this.paymentMethods = this.paymentMethods.filter(
-    (m) => m._id.toString() !== methodId,
-  );
-  if (
-    this.paymentMethods.length > 0 &&
-    !this.paymentMethods.some((m) => m.isDefault)
-  ) {
-    this.paymentMethods[0].isDefault = true;
-  }
-  await this.save();
-};
-
-userSchema.methods.updateBillingDetails = async function (details) {
-  this.billingDetails = {
-    ...this.billingDetails,
-    ...details,
-  };
-  await this.save();
-};
-
-userSchema.methods.startGracePeriod = async function () {
-  const graceEnd = new Date();
-  graceEnd.setDate(
-    graceEnd.getDate() + this.subscriptionPreferences.gracePeriodDays,
-  );
-  this.gracePeriodEndsAt = graceEnd;
-  await this.save();
-};
-
-userSchema.methods.endGracePeriod = async function () {
-  this.gracePeriodEndsAt = null;
-  await this.save();
-};
-
-userSchema.methods.updateInvoiceSummary = async function (amount) {
-  this.invoiceSummary.totalPaid += amount;
-  this.invoiceSummary.totalInvoices += 1;
-  this.invoiceSummary.lastInvoiceDate = new Date();
-  this.invoiceSummary.lastInvoiceAmount = amount;
-  await this.save();
-};
-
-userSchema.methods.applyCoupon = async function (couponData) {
-  this.activeCoupons.push({
-    ...couponData,
-    validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-  });
-  await this.save();
-};
-
-userSchema.methods.generateReferralCode = async function () {
-  const code = `${this.name.slice(0, 3).toUpperCase()}${Date.now().toString(36)}`;
-  this.referralCode = code;
-  await this.save();
-  return code;
-};
-
-userSchema.methods.addReferralEarnings = async function (amount) {
-  this.referralEarnings += amount;
-  await this.save();
-};
-
-userSchema.methods.getDefaultSenderEmail = function () {
-  if (this.emailSettings && this.emailSettings.emailIdentities) {
-    const defaultIdentity = this.emailSettings.emailIdentities.find(
-      (i) => i.isDefault,
-    );
-    if (defaultIdentity) return defaultIdentity.email;
-  }
-  if (this.companyEmail) return this.companyEmail;
-  return this.email;
-};
-
-userSchema.methods.getSmtpConfig = function () {
-  const defaultConfig = {
-    host: "smtp.gmail.com",
-    port: 587,
-    secure: false,
-    auth: {
-      user: this.email,
-      pass: null,
-    },
-  };
-  if (this.emailSettings && this.emailSettings.smtpHost) {
-    return {
-      host: this.emailSettings.smtpHost,
-      port: this.emailSettings.smtpPort || 587,
-      secure: this.emailSettings.smtpSecure || false,
-      auth: {
-        user: this.emailSettings.smtpUser || this.email,
-        pass: this.emailSettings.smtpPassword,
-      },
-    };
-  }
-  return defaultConfig;
-};
-
-userSchema.methods.getTeamMembers = async function () {
-  if (this.teamMembers && this.teamMembers.length > 0) {
-    return await this.model("User")
-      .find({
-        _id: { $in: this.teamMembers },
-        isActive: true,
-      })
-      .select("_id name email pushToken notificationSettings emailSettings");
-  }
-  return [];
-};
-
-userSchema.methods.getReportingChain = async function () {
-  const chain = [];
-  let currentUser = this;
-  while (currentUser.reportingTo) {
-    const manager = await this.model("User").findById(currentUser.reportingTo);
-    if (manager && manager.isActive) {
-      chain.push(manager);
-      currentUser = manager;
-    } else {
-      break;
-    }
-  }
-  return chain;
-};
-
-userSchema.methods.shouldReceiveNotification = function (type) {
-  if (!this.notificationSettings) return true;
-  switch (type) {
-    case "task":
-      return this.notificationSettings.taskNotifications;
-    case "lead":
-      return this.notificationSettings.leadNotifications;
-    case "project":
-      return this.notificationSettings.projectNotifications;
-    case "push":
-      return this.notificationSettings.pushNotifications;
-    default:
-      return true;
-  }
-};
-
-userSchema.methods.canSendEmail = async function () {
-  const limits = this.emailSettings?.preferences || {
-    dailySendLimit: 500,
-    hourlySendLimit: 50,
-  };
-  return {
-    allowed: true,
-    remainingDaily: limits.dailySendLimit,
-    remainingHourly: limits.hourlySendLimit,
-  };
-};
-
 // ============================================
 // STATIC METHODS
 // ============================================
 userSchema.statics.hashPassword = async function (password) {
   const salt = await bcrypt.genSalt(10);
   return await bcrypt.hash(password, salt);
-};
-
-userSchema.statics.getManagersAndAdmins = async function () {
-  return await this.find({
-    role: { $in: ["admin", "manager", "supervisor"] },
-    isActive: true,
-  }).select("_id name email pushToken notificationSettings emailSettings");
-};
-
-userSchema.statics.getUsersWithExpiringSubscriptions = async function (
-  days = 7,
-) {
-  const expiryDate = new Date();
-  expiryDate.setDate(expiryDate.getDate() + days);
-  return await this.find({
-    currentSubscription: { $ne: null },
-    "subscriptionPreferences.notifyBeforeExpiry": { $gte: days },
-  }).populate({
-    path: "currentSubscription",
-    populate: { path: "planId" },
-  });
-};
-
-userSchema.statics.getUsersInTrial = async function () {
-  const now = new Date();
-  return await this.find({
-    trialUsed: true,
-    "trialHistory.endedAt": { $gt: now },
-    "trialHistory.convertedToPaid": false,
-  });
-};
-
-userSchema.statics.getUsersInGracePeriod = async function () {
-  const now = new Date();
-  return await this.find({
-    gracePeriodEndsAt: { $gt: now },
-  });
-};
-
-userSchema.statics.findByPlan = async function (planName) {
-  return await this.find({
-    "subscriptionHistory.planName": planName,
-    "subscriptionHistory.status": "active",
-  }).populate("currentSubscription");
-};
-
-userSchema.statics.getSubscriptionStats = async function () {
-  const now = new Date();
-  const stats = await this.aggregate([
-    {
-      $facet: {
-        total: [{ $count: "total" }],
-        withSubscription: [
-          { $match: { currentSubscription: { $ne: null } } },
-          { $count: "count" },
-        ],
-        inTrial: [
-          {
-            $match: {
-              trialUsed: true,
-              "trialHistory.endedAt": { $gt: now },
-              "trialHistory.convertedToPaid": false,
-            },
-          },
-          { $count: "count" },
-        ],
-        inGracePeriod: [
-          { $match: { gracePeriodEndsAt: { $gt: now } } },
-          { $count: "count" },
-        ],
-        byRole: [{ $group: { _id: "$role", count: { $sum: 1 } } }],
-      },
-    },
-  ]);
-  return stats[0];
 };
 
 module.exports = mongoose.model("User", userSchema);

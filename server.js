@@ -154,6 +154,10 @@ const paymentRoutes = require("./routes/paymentRoutes");
 const webhookRoutes = require("./routes/webhookRoutes");
 const supportRoutes = require("./routes/supportRoutes");
 const chatRoutes = require("./routes/chatRoutes");
+const googleAuthRoutes = require("./routes/googleAuthRoutes");
+
+// ============ USE GOOGLE AUTH ROUTES ============
+app.use("/api/auth/google", googleAuthRoutes);
 
 // ============ USE ROUTES ============
 app.use("/api/auth", authRoutes);
