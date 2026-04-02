@@ -168,7 +168,7 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/activities", activitiesRoute);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/calendar", calendarRoutes);
-app.use("/api/templates", templateRoutes);
+app.use("/api/templates", templateRoutes);   
 app.use("/api/payments", paymentRoutes);
 app.use("/api/webhooks", webhookRoutes);
 app.use("/api/support", supportRoutes);
