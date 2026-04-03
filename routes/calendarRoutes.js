@@ -276,6 +276,7 @@ router.post("/quick-add", protect, validateQuickAddEvent, async (req, res) => {
   }
 });
 
+
 // Test notification endpoint
 router.post("/test-notification", protect, async (req, res) => {
   try {
