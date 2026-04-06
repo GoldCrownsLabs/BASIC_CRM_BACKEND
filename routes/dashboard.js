@@ -46,6 +46,8 @@ router.get("/", (req, res) => {
           email: req.user.email,
         }
       : "No user data",
+
+      
   });
 });
 
