@@ -9,6 +9,7 @@ const Notification = require("../services/notifications");
 // @route   GET /api/contacts
 // @access  Private
 // ===============================
+
 const getContacts = async (req, res) => {
   try {
     const {

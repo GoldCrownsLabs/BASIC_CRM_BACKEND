@@ -55,6 +55,7 @@ router.post(
   createContact,
 );
 
+
 // ======== INDIVIDUAL CONTACT ROUTES ========
 
 // @route   GET /api/contacts/:id
