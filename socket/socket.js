@@ -783,6 +783,8 @@ const sendEventReminder = async (eventId) => {
   }
 };
 
+// This function can be called by a scheduled job (e.g., daily at 8 AM) to send users their agenda for the day
+
 const sendDailyAgenda = async (userId) => {
   try {
     const today = new Date();

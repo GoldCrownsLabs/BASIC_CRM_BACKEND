@@ -11,6 +11,8 @@ class ChatSocket {
     this.adminRooms = new Map(); // adminId -> room name
   }
 
+
+  // Initialize socket connections and event handlers
   initialize() {
     this.io.on("connection", (socket) => {
       console.log("🔌 New client connected:", socket.id);

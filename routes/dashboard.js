@@ -27,6 +27,7 @@ router.get("/quick-stats", dashboardController.getQuickStats);
 router.get("/search", dashboardController.searchDashboard);
 
 // Test route
+// This route is for testing the dashboard route and middleware
 router.get("/", (req, res) => {
   res.json({
     success: true,

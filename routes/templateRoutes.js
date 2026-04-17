@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { protect, admin } = require("../middleware/auth");
+// Controllers
 const {
   createTemplate,
   getTemplates,
@@ -20,7 +21,7 @@ router.use(protect);
 // Template CRUD
 router.route("/").post(createTemplate).get(getTemplates);
 
-
+// Admin route to get all templates
 
 // Helper routes
 router.get("/variables-help", getVariablesHelp);
@@ -36,5 +37,7 @@ router
 
 // Send template to leads
 router.post("/:id/send", sendTemplateToLeads);
+
+// Admin route to get all templates
 
 module.exports = router;

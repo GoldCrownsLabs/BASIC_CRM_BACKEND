@@ -22,10 +22,12 @@ if (notificationController.getNotificationStats) {
   router.get("/stats", notificationController.getNotificationStats);
 }
 
+// Optional: Clear all notifications route (use with caution)
 if (notificationController.clearAllNotifications) {
   router.delete("/", notificationController.clearAllNotifications);
 }
 
+// Optional: Get single notification by ID
 if (notificationController.getNotificationById) {
   router.get("/:id", notificationController.getNotificationById);
 }

@@ -156,6 +156,7 @@ const contactAuth = {
         return res.status(400).json({
           success: false,
           message: "Contact with this email already exists",
+          
         });
       }
 

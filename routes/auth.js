@@ -49,18 +49,21 @@ router.delete("/delete-profile", protect, deleteAccount);
 // Address routes - with address ownership check
 router.get("/addresses", protect, getAddresses);
 router.post("/addresses", protect, addAddress);
+// Address update/delete with ownership check
 router.put(
   "/addresses/:addressId",
   protect,
   checkAddressOwnership,
   updateAddress,
 );
+// Address delete with ownership check
 router.delete(
   "/addresses/:addressId",
   protect,
   checkAddressOwnership,
   deleteAddress,
 );
+// Set default address with ownership check
 router.put(
   "/addresses/:addressId/set-default",
   protect,

@@ -36,22 +36,28 @@ router.post(
   validateSubscription,
   asyncHandler(paymentController.createSubscription),
 );
+// Webhook route (no auth, but with signature verification inside controller)
 
 router.post(
   "/verify-payment",
   validatePayment,
   asyncHandler(paymentController.verifyPayment),
 );
+// User subscription routes
 
 router.get(
   "/my-subscriptions",
   asyncHandler(paymentController.getUserSubscriptions),
 );
 
+// Get details of a specific subscription
+
 router.get(
   "/subscription/:id",
   asyncHandler(paymentController.getSubscriptionDetails),
 );
+
+// Cancel subscription
 
 router.post(
   "/cancel/:subscriptionId",
@@ -67,5 +73,7 @@ router.post(
   [body("code").notEmpty()],
   asyncHandler(paymentController.applyCoupon),
 );
+
+// Admin route to get all payments
 
 module.exports = router;

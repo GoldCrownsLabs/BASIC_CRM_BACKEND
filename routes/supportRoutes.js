@@ -37,6 +37,8 @@ const ticketValidation = [
   body("deviceInfo").optional().isObject(),
 ];
 
+// Validation for submitting feedback on common issues
+
 const feedbackValidation = [
   body("name").notEmpty().withMessage("Name is required").trim(),
   body("email")
@@ -50,10 +52,14 @@ const feedbackValidation = [
   body("deviceInfo").optional().isObject(),
 ];
 
+// Validation for adding response to ticket
+
 const responseValidation = [
   body("message").notEmpty().withMessage("Message is required").trim(),
   body("attachments").optional().isArray(),
 ];
+
+// Validation for tracking FAQ helpfulness
 
 const faqHelpfulnessValidation = [
   body("faqId").isInt().withMessage("FAQ ID must be a number"),
@@ -70,12 +76,16 @@ router.post(
   supportMiddleware.validateFAQ,
   supportController.trackFAQHelpfulness,
 );
+
+// Submit support ticket (no auth, but with rate limiting and validation)
 router.post(
   "/tickets",
   apiLimiter,
   ticketValidation,
   supportController.submitTicket,
 );
+
+// Route to get common issues for a specific product/feature
 router.post(
   "/feedback",
   apiLimiter,
@@ -94,6 +104,8 @@ router.get(
   supportMiddleware.canViewTicket,
   supportController.getTicket,
 );
+
+// Add response to ticket
 router.post(
   "/tickets/:ticketId/response",
   [param("ticketId").notEmpty().withMessage("Ticket ID is required")],
@@ -104,6 +116,8 @@ router.post(
 
 // ============ ADMIN ROUTES ============
 router.use(admin); // All routes below this require admin access
+
+// Admin dashboard statistics
 
 router.get("/admin/statistics", supportController.getStatistics);
 router.get("/admin/tickets", supportController.getAllTickets);

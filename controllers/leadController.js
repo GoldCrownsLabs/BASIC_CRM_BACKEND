@@ -245,6 +245,8 @@ exports.getLeadById = async (req, res) => {
       });
     }
 
+    // Generic error response
+
     res.status(500).json({
       success: false,
       error: "Failed to fetch lead",
@@ -498,6 +500,8 @@ exports.updateLeadStatus = async (req, res) => {
         .catch((err) => console.error("Status notification error:", err));
     });
 
+
+    // Populate references for response
     
     res.json({
       success: true,

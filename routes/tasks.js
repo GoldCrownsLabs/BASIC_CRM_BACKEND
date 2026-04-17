@@ -92,6 +92,8 @@ router.get(
  * @access  Private
  * ✅ Added ownership check + validation
  */
+
+// Note: PUT is used for full updates, so all fields should be validated and required in the controller
 router.put(
   "/:id",
   protect,
@@ -100,6 +102,7 @@ router.put(
   taskAuth.validateAssignedUsers,
   taskController.updateTask,
 );
+// If you want to support partial updates, consider using PATCH and adjusting the validation accordingly
 
 /**
  * @route   DELETE /api/tasks/:id

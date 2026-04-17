@@ -43,6 +43,8 @@ router.post("/", protect, validateEvent, async (req, res) => {
       },
     };
 
+    // Create event
+
     const event = await CalendarEvent.create(eventData);
 
     // Populate references
